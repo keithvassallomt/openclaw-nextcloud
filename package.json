@@ -1,0 +1,15 @@
+{
+  "name": "openclaw-nextcloud",
+  "version": "0.1.0",
+  "description": "OpenClaw skill for interacting with Nextcloud notes, todos, and files",
+  "bin": {
+    "nextcloud": "./index.js"
+  },
+  "type": "module",
+  "dependencies": {
+    "node-fetch": "^3.3.2",
+    "xml2js": "^0.6.2",
+    "fast-xml-parser": "^4.3.2",
+    "date-fns": "^2.30.0"
+  }
+}
