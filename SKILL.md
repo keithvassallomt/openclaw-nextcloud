@@ -1,5 +1,9 @@
 ---
-summary: "Manage Notes, Tasks, Calendar, Files, and Contacts in your Nextcloud instance via CalDAV, WebDAV, and Notes API."
+name: openclaw-nextcloud
+description: Manage Notes, Tasks, Calendar, Files, and Contacts in your Nextcloud instance via CalDAV, WebDAV, and Notes API. Use for creating notes, managing todos and calendar events, uploading/downloading files, and managing contacts.
+allowed-tools:
+  - Bash
+  - Read
 ---
 
 # OpenClaw Nextcloud Skill

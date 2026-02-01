@@ -1,8 +1,3 @@
----
-summary: "Manage Notes, Tasks, Calendar, Files, and Contacts in your Nextcloud instance via CalDAV, WebDAV, and Notes API."
----
-
-
 # OpenClaw Nextcloud Skill
 
 A Node.js CLI tool for interacting with Nextcloud services including notes, files, calendars, tasks, and contacts.
