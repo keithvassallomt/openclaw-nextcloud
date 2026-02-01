@@ -1,9 +1,9 @@
 ---
 name: openclaw-nextcloud
 description: Manage Notes, Tasks, Calendar, Files, and Contacts in your Nextcloud instance via CalDAV, WebDAV, and Notes API. Use for creating notes, managing todos and calendar events, uploading/downloading files, and managing contacts.
-allowed-tools:
-  - Bash
-  - Read
+license: MIT
+compatibility: Requires Node.js 20+. Needs network access to Nextcloud instance.
+allowed-tools: Bash Read
 ---
 
 # OpenClaw Nextcloud Skill
@@ -17,8 +17,6 @@ The skill requires the following environment variables:
 - `NEXTCLOUD_URL`: The base URL of your Nextcloud instance (e.g., `https://cloud.example.com`).
 - `NEXTCLOUD_USER`: Your Nextcloud username.
 - `NEXTCLOUD_TOKEN`: An App Password (recommended) or your login password.
-
-**Important:** If the `node_modules` directory is missing or dependencies fail to load, run `npm install` in the skill directory before executing commands.
 
 ## Features
 
@@ -44,10 +42,10 @@ The skill requires the following environment variables:
 
 ## Usage
 
-Run the skill via the `openclaw-nextcloud/index.js` script.
+Run the skill via the bundled script.
 
 ```bash
-node openclaw-nextcloud/index.js <command> <subcommand> [options]
+node scripts/nextcloud.js <command> <subcommand> [options]
 ```
 
 ## Commands
@@ -221,56 +219,55 @@ When creating contacts, if the user does not specify an address book:
 
 ## Agent Behavior: Presenting Information
 
-When displaying data to the user, always format it in a visually appealing way:
+When displaying data to the user, format it in a readable way. Output may be sent to messaging platforms (Telegram, WhatsApp, etc.) where markdown does not render, so avoid markdown formatting.
 
 ### General Guidelines
 - Use emojis to make output scannable and friendly
-- Use markdown formatting (bold, lists, tables) where appropriate
+- Do NOT use markdown formatting (no **bold**, *italic*, `code`, tables, or lists with - or *)
+- Use plain text with line breaks for structure
 - Convert technical formats (like CalDAV dates) to human-readable formats
 - Group related items logically
 
 ### Emoji Reference
-| Type | Emoji |
-|------|-------|
-| Tasks | ✅ (completed), ⬜ (pending), 🔴 (high priority), 🟡 (medium), 🟢 (low) |
-| Calendar | 📅 (event), ⏰ (time), 📍 (location) |
-| Notes | 📝 (note), 📁 (category) |
-| Files | 📄 (file), 📂 (folder), 💾 (size) |
-| Contacts | 👤 (person), 📧 (email), 📱 (phone), 🏢 (organization) |
-| Status | ✨ (created), ✏️ (updated), 🗑️ (deleted), ❌ (error) |
+Tasks: ✅ (completed), ⬜ (pending), 🔴 (high priority), 🟡 (medium), 🟢 (low)
+Calendar: 📅 (event), ⏰ (time), 📍 (location)
+Notes: 📝 (note), 📁 (category)
+Files: 📄 (file), 📂 (folder), 💾 (size)
+Contacts: 👤 (person), 📧 (email), 📱 (phone), 🏢 (organization)
+Status: ✨ (created), ✏️ (updated), 🗑️ (deleted), ❌ (error)
 
 ### Example Presentations
 
-**Tasks:**
+Tasks:
 ```
-📋 **Your Tasks**
+📋 Your Tasks
 
 ⬜ 🔴 Buy groceries — Due: Tomorrow 3:30 PM
 ⬜ 🟡 Review PR #42 — Due: Feb 5
 ✅ Send email to client
 ```
 
-**Calendar Events:**
+Calendar Events:
 ```
-📅 **Upcoming Events**
+📅 Upcoming Events
 
-🗓️ **Team Standup**
+🗓️ Team Standup
    ⏰ Mon, Feb 3 • 10:00 AM - 10:30 AM
    📍 Zoom
 
-🗓️ **Project Review**
+🗓️ Project Review
    ⏰ Wed, Feb 5 • 2:00 PM - 3:00 PM
 ```
 
-**Contacts:**
+Contacts:
 ```
-👤 **John Doe**
+👤 John Doe
    📧 john@example.com
    📱 +1 234 567 890
    🏢 ACME Inc — Developer
 ```
 
-**Files:**
+Files:
 ```
 📂 Documents/
    📄 report.pdf (2.3 MB)
@@ -279,6 +276,6 @@ When displaying data to the user, always format it in a visually appealing way:
 ```
 
 ### Date/Time Formatting
-- Convert CalDAV format `20260205T100000Z` to readable format like `Wed, Feb 5 • 10:00 AM`
-- Show relative dates when helpful: "Tomorrow", "Next Monday", "In 3 days"
-- Use the user's local timezone when possible
+Convert CalDAV format 20260205T100000Z to readable format like Wed, Feb 5 • 10:00 AM
+Show relative dates when helpful: "Tomorrow", "Next Monday", "In 3 days"
+Use the user's local timezone when possible

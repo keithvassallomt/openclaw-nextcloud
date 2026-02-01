@@ -21,10 +21,26 @@ A Node.js CLI tool for interacting with Nextcloud services including notes, file
 ```bash
 git clone https://github.com/keithvassallomt/openclaw-nextcloud.git
 cd openclaw-nextcloud
-npm install
 ```
 
-**Note:** If the `node_modules` directory is missing or dependencies fail to load, run `npm install` in the skill directory to install the required packages.
+The skill is pre-bundled with all dependencies in `scripts/nextcloud.js` - no npm install required.
+
+## Development
+
+The project uses a bundled architecture:
+
+- **`index.js`** - Source code (edit this)
+- **`scripts/nextcloud.js`** - Bundled output with all dependencies (run this)
+
+To make changes:
+
+```bash
+npm install              # Install dev dependencies (first time only)
+# Edit index.js
+npm run build            # Bundle into scripts/nextcloud.js
+```
+
+Both files should be committed - the bundle allows users/agents to run the skill without npm install.
 
 ## Configuration
 Store these values in environment variables, or openclawd.json, or use a .env file.
@@ -44,105 +60,105 @@ NEXTCLOUD_TOKEN=your_app_password
 ## Usage
 
 ```bash
-node index.js <command> <subcommand> [options]
+node scripts/nextcloud.js <command> <subcommand> [options]
 ```
 
 ### Notes
 
 ```bash
 # List all notes
-node index.js notes list
+node scripts/nextcloud.js notes list
 
 # Create a note
-node index.js notes create --title "My Note" --content "Note content" --category "Personal"
+node scripts/nextcloud.js notes create --title "My Note" --content "Note content" --category "Personal"
 
 # Get a specific note
-node index.js notes get --id 123
+node scripts/nextcloud.js notes get --id 123
 
 # Update a note
-node index.js notes edit --id 123 --title "Updated Title" --content "New content"
+node scripts/nextcloud.js notes edit --id 123 --title "Updated Title" --content "New content"
 
 # Delete a note
-node index.js notes delete --id 123
+node scripts/nextcloud.js notes delete --id 123
 ```
 
 ### Files
 
 ```bash
 # List files in a directory
-node index.js files list --path "Documents/"
+node scripts/nextcloud.js files list --path "Documents/"
 
 # Upload a file
-node index.js files upload --path "Documents/test.txt" --content "Hello World"
+node scripts/nextcloud.js files upload --path "Documents/test.txt" --content "Hello World"
 
 # Download a file
-node index.js files get --path "Documents/test.txt"
+node scripts/nextcloud.js files get --path "Documents/test.txt"
 
 # Search for files
-node index.js files search --query "report"
+node scripts/nextcloud.js files search --query "report"
 
 # Delete a file
-node index.js files delete --path "Documents/test.txt"
+node scripts/nextcloud.js files delete --path "Documents/test.txt"
 ```
 
 ### Calendar
 
 ```bash
 # List available calendars
-node index.js calendars list
+node scripts/nextcloud.js calendars list
 
 # List events in a date range
-node index.js calendar list --from "2026-02-01T00:00:00Z" --to "2026-02-28T23:59:59Z"
+node scripts/nextcloud.js calendar list --from "2026-02-01T00:00:00Z" --to "2026-02-28T23:59:59Z"
 
 # Create an event
-node index.js calendar create --summary "Team Meeting" --start "2026-02-05T10:00:00Z" --end "2026-02-05T11:00:00Z"
+node scripts/nextcloud.js calendar create --summary "Team Meeting" --start "2026-02-05T10:00:00Z" --end "2026-02-05T11:00:00Z"
 
 # Update an event
-node index.js calendar edit --uid event-uid --summary "Updated Meeting"
+node scripts/nextcloud.js calendar edit --uid event-uid --summary "Updated Meeting"
 
 # Delete an event
-node index.js calendar delete --uid event-uid
+node scripts/nextcloud.js calendar delete --uid event-uid
 ```
 
 ### Tasks
 
 ```bash
 # List all tasks
-node index.js tasks list
+node scripts/nextcloud.js tasks list
 
 # Create a task
-node index.js tasks create --title "Buy groceries" --due "2026-02-05T17:00:00Z" --priority 1
+node scripts/nextcloud.js tasks create --title "Buy groceries" --due "2026-02-05T17:00:00Z" --priority 1
 
 # Complete a task
-node index.js tasks complete --uid task-uid
+node scripts/nextcloud.js tasks complete --uid task-uid
 
 # Delete a task
-node index.js tasks delete --uid task-uid
+node scripts/nextcloud.js tasks delete --uid task-uid
 ```
 
 ### Contacts
 
 ```bash
 # List address books
-node index.js addressbooks list
+node scripts/nextcloud.js addressbooks list
 
 # List all contacts
-node index.js contacts list
+node scripts/nextcloud.js contacts list
 
 # Search contacts
-node index.js contacts search --query "john"
+node scripts/nextcloud.js contacts search --query "john"
 
 # Create a contact
-node index.js contacts create --name "John Doe" --email "john@example.com" --phone "+1234567890"
+node scripts/nextcloud.js contacts create --name "John Doe" --email "john@example.com" --phone "+1234567890"
 
 # Get a specific contact
-node index.js contacts get --uid contact-uid
+node scripts/nextcloud.js contacts get --uid contact-uid
 
 # Update a contact
-node index.js contacts edit --uid contact-uid --email "newemail@example.com"
+node scripts/nextcloud.js contacts edit --uid contact-uid --email "newemail@example.com"
 
 # Delete a contact
-node index.js contacts delete --uid contact-uid
+node scripts/nextcloud.js contacts delete --uid contact-uid
 ```
 
 ## Output Format
@@ -180,7 +196,6 @@ This tool uses the following Nextcloud APIs:
 
 - [node-fetch](https://www.npmjs.com/package/node-fetch) - HTTP client
 - [fast-xml-parser](https://www.npmjs.com/package/fast-xml-parser) - XML parsing
-- [xml2js](https://www.npmjs.com/package/xml2js) - XML parsing
 - [date-fns](https://www.npmjs.com/package/date-fns) - Date formatting
 
 ## License
