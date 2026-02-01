@@ -1,3 +1,7 @@
+---
+summary: "Manage Notes, Tasks, Calendar, Files, and Contacts in your Nextcloud instance via CalDAV, WebDAV, and Notes API."
+---
+
 # OpenClaw Nextcloud Skill
 
 This skill provides integration with a Nextcloud instance. It supports access to Notes, Tasks (Todos), Calendars, Files, and Contacts.
@@ -9,6 +13,8 @@ The skill requires the following environment variables:
 - `NEXTCLOUD_URL`: The base URL of your Nextcloud instance (e.g., `https://cloud.example.com`).
 - `NEXTCLOUD_USER`: Your Nextcloud username.
 - `NEXTCLOUD_TOKEN`: An App Password (recommended) or your login password.
+
+**Important:** If the `node_modules` directory is missing or dependencies fail to load, run `npm install` in the skill directory before executing commands.
 
 ## Features
 
