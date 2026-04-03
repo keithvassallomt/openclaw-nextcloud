@@ -5,8 +5,8 @@ A Node.js CLI tool for interacting with Nextcloud services including notes, file
 ## Features
 
 - **Notes** - Create, read, update, and delete notes
-- **Files** - Upload, download, list, search, and delete files via WebDAV (inkl. automatischem Anlegen fehlender Verzeichnisse)
-- **Shares** - Erstellen, auflisten und löschen von öffentlichen Link-Shares über die OCS Share API
+- **Files** - Upload, download, list, search, and delete files via WebDAV (including automatic creation of missing directories)
+- **Shares** - Create, list, and delete public link shares via the OCS Share API
 - **Calendar** - Manage calendar events via CalDAV
 - **Tasks** - Create and manage tasks/todos
 - **Contacts** - Full contact management via CardDAV
@@ -44,7 +44,8 @@ npm run build            # Bundle into scripts/nextcloud.js
 Both files should be committed - the bundle allows users/agents to run the skill without npm install.
 
 ## Configuration
-Store these values in environment variables, or openclawd.json, or use a .env file.
+
+Store these values in environment variables, in `openclawd.json`, or in a `.env` file.
 
 ```env
 NEXTCLOUD_URL=https://your-nextcloud-instance.com
@@ -87,57 +88,55 @@ node scripts/nextcloud.js notes delete --id 123
 
 ```bash
 # List files in a directory
-node scripts/nextcloud.js files list --path "Tron/Reports/"
+node scripts/nextcloud.js files list --path "Documents/Reports/"
 
-# Upload a file (parent directories will be created automatically via MKCOL)
-node scripts/nextcloud.js files upload --path "Tron/Reports/test.txt" --content "Hello World"
+# Upload a file (parent directories will be created automatically)
+node scripts/nextcloud.js files upload --path "Documents/Reports/test.txt" --content "Hello World"
 
 # Download a file
-node scripts/nextcloud.js files get --path "Tron/Reports/test.txt"
+node scripts/nextcloud.js files get --path "Documents/Reports/test.txt"
 
 # Search for files
 node scripts/nextcloud.js files search --query "report"
 
 # Delete a file
-node scripts/nextcloud.js files delete --path "Tron/Reports/test.txt"
+node scripts/nextcloud.js files delete --path "Documents/Reports/test.txt"
 ```
 
-Die File-Listings und Suchergebnisse enthalten zusätzlich zu Name/Pfad/Typ u. a. auch eine `fileId` (sofern vom Server geliefert) sowie einen lokal berechneten `internalLink` im Format `NEXTCLOUD_URL/index.php/f/<fileId>`.
+File listings and search results include the file name, path, type, a `fileId` (if provided by the server), and a locally computed `internalLink` in the format `NEXTCLOUD_URL/index.php/f/<fileId>`.
 
 ### Shares (OCS Share API)
 
-Der Skill unterstützt öffentliche Link-Shares über die Nextcloud OCS Share API.
-
 ```bash
-# Öffentlichen Link-Share für Datei/Ordner erstellen
+# Create a public link share for a file or folder
 node scripts/nextcloud.js shares create-link \
-  --path "/Tron/Reports" \
+  --path "/Documents/Reports" \
   [--permissions read|edit] \
   [--password "Secret123"] \
   [--expire "2026-04-15"]
 
-# Alle Shares des Benutzers auflisten
+# List all shares for the current user
 node scripts/nextcloud.js shares list
 
-# Shares zu einem bestimmten Pfad auflisten
-node scripts/nextcloud.js shares list --path "/Tron/Reports"
+# List shares for a specific path
+node scripts/nextcloud.js shares list --path "/Documents/Reports"
 
-# Share nach ID löschen
+# Delete a share by ID
 node scripts/nextcloud.js shares delete --id 29
 ```
 
 - `--permissions`
-  - `read` (Default): Nur Leserechte (Standard-Permissionswert 1)
-  - `edit`: Vollzugriff (Nextcloud-Permissions 15: create/update/delete/share)
-- `--password`: Setzt ein Passwort auf den Link-Share
-- `--expire`: Ablaufdatum im Format `YYYY-MM-DD`
+  - `read` (default): Read-only access (permission value 1)
+  - `edit`: Full access (Nextcloud permissions 15: create/update/delete/share)
+- `--password`: Set a password on the link share
+- `--expire`: Expiry date in `YYYY-MM-DD` format
 
-Die Ausgabe von `shares create-link` enthält u. a.:
+The output of `shares create-link` includes:
 
 ```json
 {
   "id": "29",
-  "path": "/Tron/Reports",
+  "path": "/Documents/Reports",
   "shareType": 3,
   "permissions": 17,
   "token": "K8XafX9fgk4n3LD",
@@ -147,7 +146,7 @@ Die Ausgabe von `shares create-link` enthält u. a.:
 }
 ```
 
-`shares list` gibt eine Liste solcher Objekte zurück, `shares delete` liefert `{ id, status: 'deleted' }`.
+`shares list` returns a list of such objects; `shares delete` returns `{ id, status: 'deleted' }`.
 
 ### Calendar
 
