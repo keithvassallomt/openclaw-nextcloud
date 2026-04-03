@@ -818,6 +818,76 @@ const CalDAV = {
 
 // 5. Shares (OCS Share API)
 const Shares = {
+    async listShares({ path = null } = {}) {
+        const baseUrl = CONFIG.url.replace(/\/+$/, '');
+        let url = `${baseUrl}/ocs/v2.php/apps/files_sharing/api/v1/shares`;
+        if (path) {
+            const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+            const filesPath = `/${cleanPath}`;
+            // OCS expects path as query param for filtering by path
+            url += `?path=${encodeURIComponent(filesPath)}`;
+        }
+
+        const res = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': AUTH_HEADER,
+                'OCS-APIREQUEST': 'true',
+                'Accept': 'application/json'
+            }
+        });
+
+        if (!res.ok) {
+            throw new Error(`OCS HTTP ${res.status}: ${res.statusText}`);
+        }
+
+        const json = await res.json();
+        const meta = json.ocs?.meta;
+        if (!meta || meta.status !== 'ok') {
+            throw new Error(`OCS error ${meta?.statuscode}: ${meta?.message}`);
+        }
+
+        const data = json.ocs.data || [];
+        // Normalisieren, damit der Skill konsistente Felder bereitstellt
+        return (Array.isArray(data) ? data : [data]).map(s => ({
+            id: s.id,
+            path: s.path,
+            shareType: s.share_type,
+            shareWith: s.share_with || null,
+            permissions: s.permissions,
+            token: s.token || null,
+            url: s.url || (s.token ? `${baseUrl}/s/${s.token}` : null),
+            expireDate: s.expiration || null
+        }));
+    },
+
+    async deleteShare({ id }) {
+        if (!id) throw new Error('Missing share id');
+        const baseUrl = CONFIG.url.replace(/\/+$/, '');
+        const url = `${baseUrl}/ocs/v2.php/apps/files_sharing/api/v1/shares/${encodeURIComponent(id)}`;
+
+        const res = await fetch(url, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': AUTH_HEADER,
+                'OCS-APIREQUEST': 'true',
+                'Accept': 'application/json'
+            }
+        });
+
+        if (!res.ok) {
+            throw new Error(`OCS HTTP ${res.status}: ${res.statusText}`);
+        }
+
+        const json = await res.json();
+        const meta = json.ocs?.meta;
+        if (!meta || meta.status !== 'ok') {
+            throw new Error(`OCS error ${meta?.statuscode}: ${meta?.message}`);
+        }
+
+        return { id, status: 'deleted' };
+    },
+
     async createLinkShare({ path, permissions = 'read', password = null, expireDate = null }) {
         if (!path) throw new Error('Missing path for share');
 
@@ -1505,6 +1575,17 @@ async function main() {
                     password,
                     expireDate
                 });
+                output(result);
+            } else if (subCommand === 'list') {
+                const pathIndex = args.indexOf('--path');
+                const sharePath = pathIndex !== -1 ? args[pathIndex + 1] : null;
+                const result = await Shares.listShares({ path: sharePath });
+                output(result);
+            } else if (subCommand === 'delete') {
+                const idIndex = args.indexOf('--id');
+                if (idIndex === -1) throw new Error('Missing --id');
+                const id = args[idIndex + 1];
+                const result = await Shares.deleteShare({ id });
                 output(result);
             } else {
                 throw new Error('Unknown shares command');
