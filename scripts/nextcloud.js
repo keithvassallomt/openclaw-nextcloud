@@ -15832,6 +15832,56 @@ END:VCALENDAR`;
     return { uid, status: "deleted" };
   }
 };
+var Shares = {
+  async createLinkShare({ path, permissions = "read", password = null, expireDate = null }) {
+    if (!path) throw new Error("Missing path for share");
+    const cleanPath = path.startsWith("/") ? path.slice(1) : path;
+    const filesPath = `/${cleanPath}`;
+    const url = `${CONFIG.url.replace(/\/+$/, "")}/ocs/v2.php/apps/files_sharing/api/v1/shares`;
+    const permMap = {
+      read: 1,
+      edit: 15
+      // Nextcloud-Standard: create+update+delete+share, bei Bedarf feiner aufsplitten
+    };
+    const perms = permMap[permissions] || permMap.read;
+    const body = new URLSearchParams({
+      path: filesPath,
+      shareType: "3",
+      // public link
+      permissions: String(perms)
+    });
+    if (password) body.set("password", password);
+    if (expireDate) body.set("expireDate", expireDate);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": AUTH_HEADER,
+        "OCS-APIREQUEST": "true",
+        "Accept": "application/json"
+      },
+      body
+    });
+    if (!res.ok) {
+      throw new Error(`OCS HTTP ${res.status}: ${res.statusText}`);
+    }
+    const json = await res.json();
+    const meta = json.ocs?.meta;
+    if (!meta || meta.status !== "ok") {
+      throw new Error(`OCS error ${meta?.statuscode}: ${meta?.message}`);
+    }
+    const data = json.ocs.data;
+    return {
+      id: data.id,
+      path: data.path,
+      shareType: data.share_type,
+      permissions: data.permissions,
+      token: data.token,
+      url: data.url || `${CONFIG.url.replace(/\/+$/, "")}/s/${data.token}`,
+      expireDate: data.expiration || null,
+      passwordProtected: !!password
+    };
+  }
+};
 var Contacts = {
   async findAddressBooks() {
     const endpoint = `/remote.php/dav/addressbooks/users/${CONFIG.user}/`;
@@ -16340,6 +16390,27 @@ async function main() {
         output(addressBooks.map((a) => ({ name: a.displayname })));
       } else {
         throw new Error("Unknown addressbooks command");
+      }
+    } else if (command === "shares") {
+      if (subCommand === "create-link") {
+        const pathIndex = args.indexOf("--path");
+        if (pathIndex === -1) throw new Error("Missing --path");
+        const sharePath = args[pathIndex + 1];
+        const permIndex = args.indexOf("--permissions");
+        const permissions = permIndex !== -1 ? args[permIndex + 1] : "read";
+        const pwIndex = args.indexOf("--password");
+        const password = pwIndex !== -1 ? args[pwIndex + 1] : null;
+        const expIndex = args.indexOf("--expire");
+        const expireDate = expIndex !== -1 ? args[expIndex + 1] : null;
+        const result = await Shares.createLinkShare({
+          path: sharePath,
+          permissions,
+          password,
+          expireDate
+        });
+        output(result);
+      } else {
+        throw new Error("Unknown shares command");
       }
     } else if (command === "contacts") {
       if (subCommand === "list") {
