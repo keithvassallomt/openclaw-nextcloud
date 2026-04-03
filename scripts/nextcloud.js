@@ -15319,6 +15319,24 @@ var Files = {
   },
   async upload(filePath, content) {
     const cleanPath = filePath.startsWith("/") ? filePath.slice(1) : filePath;
+    const segments = cleanPath.split("/").filter(Boolean);
+    if (segments.length > 1) {
+      const dirSegments = segments.slice(0, -1);
+      let currentPath = "";
+      for (const seg of dirSegments) {
+        currentPath = currentPath ? `${currentPath}/${seg}` : seg;
+        const dirEndpoint = `/remote.php/dav/files/${CONFIG.user}/${currentPath}`;
+        try {
+          await request(dirEndpoint, {
+            method: "MKCOL"
+          });
+        } catch (e) {
+          if (!String(e.message).includes("HTTP 405")) {
+            throw e;
+          }
+        }
+      }
+    }
     const endpoint = `/remote.php/dav/files/${CONFIG.user}/${cleanPath}`;
     await request(endpoint, {
       method: "PUT",
