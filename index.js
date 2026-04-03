@@ -209,12 +209,18 @@ const Files = {
                  if (cleanPath !== '' && name === cleanPath.split('/').pop()) return null; 
             }
 
+            const fileId = props['oc:fileid'] || props['{http://owncloud.org/ns}fileid'];
+            const baseUrl = CONFIG.url.replace(/\/+$/, '');
+            const internalLink = fileId ? `${baseUrl}/index.php/f/${fileId}` : null;
+
             return {
                 name: name,
                 path: href,
                 isDir: isDir,
                 size: props['d:getcontentlength'],
-                lastModified: props['d:getlastmodified']
+                lastModified: props['d:getlastmodified'],
+                fileId: fileId || null,
+                internalLink: internalLink
             };
         }).filter(f => f); // remove nulls
     },
@@ -312,12 +318,18 @@ const Files = {
             const props = propstats[0]['d:prop'];
             
             const isDir = props['d:resourcetype'] && props['d:resourcetype']['d:collection'] !== undefined;
+            const fileId = props['oc:fileid'] || props['{http://owncloud.org/ns}fileid'];
+            const baseUrl = CONFIG.url.replace(/\/+$/, '');
+            const internalLink = fileId ? `${baseUrl}/index.php/f/${fileId}` : null;
+
             return {
                 name: props['d:displayname'] || decodeURIComponent(href.split('/').pop()),
                 path: href,
                 isDir: isDir,
                 size: props['d:getcontentlength'],
-                lastModified: props['d:getlastmodified']
+                lastModified: props['d:getlastmodified'],
+                fileId: fileId || null,
+                internalLink: internalLink
             };
         }).filter(f => f);
     }
