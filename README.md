@@ -1,11 +1,12 @@
 # OpenClaw Nextcloud Skill
 
-A Node.js CLI tool for interacting with Nextcloud services including notes, files, calendars, tasks, and contacts.
+A Node.js CLI tool for interacting with Nextcloud services including notes, files, calendars, tasks, contacts, and shares.
 
 ## Features
 
 - **Notes** - Create, read, update, and delete notes
-- **Files** - Upload, download, list, search, and delete files via WebDAV
+- **Files** - Upload, download, list, search, and delete files via WebDAV (inkl. automatischem Anlegen fehlender Verzeichnisse)
+- **Shares** - Erstellen, auflisten und löschen von öffentlichen Link-Shares über die OCS Share API
 - **Calendar** - Manage calendar events via CalDAV
 - **Tasks** - Create and manage tasks/todos
 - **Contacts** - Full contact management via CardDAV
@@ -19,7 +20,7 @@ A Node.js CLI tool for interacting with Nextcloud services including notes, file
 ## Installation
 
 ```bash
-git clone https://github.com/keithvassallomt/openclaw-nextcloud.git
+git clone https://github.com/schemann/openclaw-nextcloud.git
 cd openclaw-nextcloud
 ```
 
@@ -86,20 +87,67 @@ node scripts/nextcloud.js notes delete --id 123
 
 ```bash
 # List files in a directory
-node scripts/nextcloud.js files list --path "Documents/"
+node scripts/nextcloud.js files list --path "Tron/Reports/"
 
-# Upload a file
-node scripts/nextcloud.js files upload --path "Documents/test.txt" --content "Hello World"
+# Upload a file (parent directories will be created automatically via MKCOL)
+node scripts/nextcloud.js files upload --path "Tron/Reports/test.txt" --content "Hello World"
 
 # Download a file
-node scripts/nextcloud.js files get --path "Documents/test.txt"
+node scripts/nextcloud.js files get --path "Tron/Reports/test.txt"
 
 # Search for files
 node scripts/nextcloud.js files search --query "report"
 
 # Delete a file
-node scripts/nextcloud.js files delete --path "Documents/test.txt"
+node scripts/nextcloud.js files delete --path "Tron/Reports/test.txt"
 ```
+
+Die File-Listings und Suchergebnisse enthalten zusätzlich zu Name/Pfad/Typ u. a. auch eine `fileId` (sofern vom Server geliefert) sowie einen lokal berechneten `internalLink` im Format `NEXTCLOUD_URL/index.php/f/<fileId>`.
+
+### Shares (OCS Share API)
+
+Der Skill unterstützt öffentliche Link-Shares über die Nextcloud OCS Share API.
+
+```bash
+# Öffentlichen Link-Share für Datei/Ordner erstellen
+node scripts/nextcloud.js shares create-link \
+  --path "/Tron/Reports" \
+  [--permissions read|edit] \
+  [--password "Secret123"] \
+  [--expire "2026-04-15"]
+
+# Alle Shares des Benutzers auflisten
+node scripts/nextcloud.js shares list
+
+# Shares zu einem bestimmten Pfad auflisten
+node scripts/nextcloud.js shares list --path "/Tron/Reports"
+
+# Share nach ID löschen
+node scripts/nextcloud.js shares delete --id 29
+```
+
+- `--permissions`
+  - `read` (Default): Nur Leserechte (Standard-Permissionswert 1)
+  - `edit`: Vollzugriff (Nextcloud-Permissions 15: create/update/delete/share)
+- `--password`: Setzt ein Passwort auf den Link-Share
+- `--expire`: Ablaufdatum im Format `YYYY-MM-DD`
+
+Die Ausgabe von `shares create-link` enthält u. a.:
+
+```json
+{
+  "id": "29",
+  "path": "/Tron/Reports",
+  "shareType": 3,
+  "permissions": 17,
+  "token": "K8XafX9fgk4n3LD",
+  "url": "https://cloud.example.com/index.php/s/K8XafX9fgk4n3LD",
+  "expireDate": null,
+  "passwordProtected": false
+}
+```
+
+`shares list` gibt eine Liste solcher Objekte zurück, `shares delete` liefert `{ id, status: 'deleted' }`.
 
 ### Calendar
 
@@ -189,6 +237,7 @@ This tool uses the following Nextcloud APIs:
 |---------|----------|----------|
 | Notes | REST | `/index.php/apps/notes/api/v1/notes` |
 | Files | WebDAV | `/remote.php/dav/files/` |
+| Shares | OCS Share API | `/ocs/v2.php/apps/files_sharing/api/v1` |
 | Calendar/Tasks | CalDAV | `/remote.php/dav/calendars/` |
 | Contacts | CardDAV | `/remote.php/dav/addressbooks/` |
 
