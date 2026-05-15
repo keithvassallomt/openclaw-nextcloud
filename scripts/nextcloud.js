@@ -18011,8 +18011,10 @@ var CalDAV = {
           const propstats = ensureArray(r["d:propstat"]);
           if (!propstats[0] || !propstats[0]["d:prop"]) continue;
           const calData = propstats[0]["d:prop"]["cal:calendar-data"];
+          const unfolded = calData.replace(/\r?\n[ \t]/g, "");
           const uidMatch = calData.match(/UID:(.*)/);
           const summaryMatch = calData.match(/SUMMARY:(.*)/);
+          const descriptionMatch = unfolded.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
           const dtstartMatch = calData.match(/DTSTART(?:;.*)?:(.*)/);
           const dtendMatch = calData.match(/DTEND(?:;.*)?:(.*)/);
           const locationMatch = calData.match(/LOCATION:(.*)/);
@@ -18020,6 +18022,7 @@ var CalDAV = {
             uid: uidMatch ? uidMatch[1].trim() : "No UID",
             calendar: cal.displayname,
             summary: summaryMatch ? summaryMatch[1].trim() : "No Title",
+            description: descriptionMatch ? descriptionMatch[1].trim() : null,
             start: dtstartMatch ? dtstartMatch[1].trim() : "Unknown",
             end: dtendMatch ? dtendMatch[1].trim() : null,
             location: locationMatch ? locationMatch[1].trim() : null
@@ -18074,7 +18077,9 @@ var CalDAV = {
             continue;
           }
           const calData = propstats[0]["d:prop"]["cal:calendar-data"];
+          const unfolded = calData.replace(/\r?\n[ \t]/g, "");
           const summaryMatch = calData.match(/SUMMARY:(.*)/);
+          const descriptionMatch = unfolded.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
           const statusMatch = calData.match(/STATUS:(.*)/);
           const uidMatch = calData.match(/UID:(.*)/);
           const dueMatch = calData.match(/DUE(?:;.*)?:(.*)/);
@@ -18083,6 +18088,7 @@ var CalDAV = {
             uid: uidMatch ? uidMatch[1].trim() : "No UID",
             calendar: cal.displayname,
             summary: summaryMatch ? summaryMatch[1].trim() : "No Title",
+            description: descriptionMatch ? descriptionMatch[1].trim() : null,
             status: statusMatch ? statusMatch[1].trim() : "NEEDS-ACTION",
             due: dueMatch ? dueMatch[1].trim() : null,
             priority: priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : null
