@@ -1,6 +1,6 @@
 {
   "name": "openclaw-nextcloud",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Manage Notes, Tasks, Calendar, Files, and Contacts in your Nextcloud instance via CalDAV, WebDAV, and Notes API.",
   "bin": {
     "nextcloud": "./scripts/nextcloud.js"

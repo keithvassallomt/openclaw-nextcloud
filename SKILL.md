@@ -5,7 +5,7 @@ compatibility: Requires Node.js 20+ and a Nextcloud app password (NEXTCLOUD_TOKE
 allowed-tools: Bash Read
 metadata:
   openclaw:
-    version: 0.2.4
+    version: 0.2.5
     requires:
       env:
         - NEXTCLOUD_URL
