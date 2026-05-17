@@ -1,3 +1,7 @@
+<p align="center">
+  <img width="400" alt="openclaw-nextcloud logo" src="https://github.com/user-attachments/assets/c337351e-4000-4521-b0d5-776f55b95772" />
+</p>
+
 # OpenClaw Nextcloud Skill
 
 A Node.js CLI tool for interacting with Nextcloud services including notes, files, calendars, tasks, and contacts.
