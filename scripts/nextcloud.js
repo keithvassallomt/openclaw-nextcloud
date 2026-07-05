@@ -18790,6 +18790,293 @@ END:VCARD`);
     return allContacts;
   }
 };
+var Deck = {
+  // Deck REST lives under /index.php/apps/deck/api/v1.1; comments use the OCS v1.0 endpoint.
+  _base: "/index.php/apps/deck/api/v1.1",
+  _headers: { "OCS-APIRequest": "true", "Accept": "application/json" },
+  _jsonHeaders: { "OCS-APIRequest": "true", "Accept": "application/json", "Content-Type": "application/json" },
+  _boardUrl(id) {
+    const baseUrl = CONFIG.url.replace(/\/+$/, "");
+    return `${baseUrl}/index.php/apps/deck/#/board/${id}`;
+  },
+  _normalizeBoard(b) {
+    return {
+      id: b.id,
+      title: b.title,
+      color: b.color,
+      archived: b.archived,
+      owner: b.owner && b.owner.uid,
+      permissions: b.permissions,
+      labelCount: Array.isArray(b.labels) ? b.labels.length : void 0,
+      stackCount: Array.isArray(b.stacks) ? b.stacks.length : void 0,
+      lastModified: b.lastModified,
+      url: this._boardUrl(b.id)
+    };
+  },
+  _normalizeCard(c) {
+    return {
+      id: c.id,
+      title: c.title,
+      description: c.description,
+      stackId: c.stackId,
+      type: c.type,
+      order: c.order,
+      labels: (c.labels || []).map((l) => ({ id: l.id, title: l.title, color: l.color })),
+      assignedUsers: (c.assignedUsers || []).map((u) => u.participant && u.participant.uid || u.uid),
+      duedate: c.duedate || null,
+      done: c.done || null,
+      archived: c.archived,
+      commentsCount: c.commentsCount,
+      createdAt: c.createdAt,
+      lastModified: c.lastModified
+    };
+  },
+  // --- Boards ---
+  async listBoards() {
+    const data = await request(`${this._base}/boards`, { headers: this._headers });
+    return (data || []).filter((b) => !b.deletedAt).map((b) => this._normalizeBoard(b));
+  },
+  async getBoard(boardId) {
+    if (!boardId) throw new Error("Board ID is required.");
+    return await request(`${this._base}/boards/${boardId}`, { headers: this._headers });
+  },
+  async createBoard(title, color = "0082c9") {
+    if (!title || title.trim() === "") throw new Error("Title is required for creating a board.");
+    const data = await request(`${this._base}/boards`, {
+      method: "POST",
+      headers: this._jsonHeaders,
+      body: JSON.stringify({ title, color })
+    });
+    return this._normalizeBoard(data);
+  },
+  async editBoard(boardId, updates = {}) {
+    if (!boardId) throw new Error("Board ID is required for update.");
+    const current = await this.getBoard(boardId);
+    const payload = {
+      title: updates.title !== void 0 ? updates.title : current.title,
+      color: updates.color !== void 0 ? updates.color : current.color,
+      archived: updates.archived !== void 0 ? updates.archived : current.archived
+    };
+    const data = await request(`${this._base}/boards/${boardId}`, {
+      method: "PUT",
+      headers: this._jsonHeaders,
+      body: JSON.stringify(payload)
+    });
+    return this._normalizeBoard(data);
+  },
+  async deleteBoard(boardId) {
+    if (!boardId) throw new Error("Board ID is required for deletion.");
+    await request(`${this._base}/boards/${boardId}`, { method: "DELETE", headers: this._headers });
+    return { success: true, id: boardId };
+  },
+  // --- Stacks (columns) ---
+  async listStacks(boardId) {
+    if (!boardId) throw new Error("Board ID is required.");
+    const data = await request(`${this._base}/boards/${boardId}/stacks`, { headers: this._headers });
+    return (data || []).map((s) => ({
+      id: s.id,
+      title: s.title,
+      boardId: s.boardId,
+      order: s.order,
+      cards: (s.cards || []).map((c) => this._normalizeCard(c)),
+      cardCount: (s.cards || []).length,
+      lastModified: s.lastModified
+    }));
+  },
+  async createStack(boardId, title, order = 999) {
+    if (!boardId) throw new Error("Board ID is required.");
+    if (!title || title.trim() === "") throw new Error("Title is required for creating a stack.");
+    const data = await request(`${this._base}/boards/${boardId}/stacks`, {
+      method: "POST",
+      headers: this._jsonHeaders,
+      body: JSON.stringify({ title, order })
+    });
+    return { id: data.id, title: data.title, boardId: data.boardId, order: data.order };
+  },
+  async editStack(boardId, stackId, updates = {}) {
+    if (!boardId || !stackId) throw new Error("Board ID and Stack ID are required for update.");
+    const stacks = await this.listStacks(boardId);
+    const current = stacks.find((s) => String(s.id) === String(stackId));
+    if (!current) throw new Error(`Stack ${stackId} not found on board ${boardId}.`);
+    const payload = {
+      title: updates.title !== void 0 ? updates.title : current.title,
+      order: updates.order !== void 0 ? updates.order : current.order
+    };
+    const data = await request(`${this._base}/boards/${boardId}/stacks/${stackId}`, {
+      method: "PUT",
+      headers: this._jsonHeaders,
+      body: JSON.stringify(payload)
+    });
+    return { id: data.id, title: data.title, boardId: data.boardId, order: data.order };
+  },
+  async deleteStack(boardId, stackId) {
+    if (!boardId || !stackId) throw new Error("Board ID and Stack ID are required for deletion.");
+    await request(`${this._base}/boards/${boardId}/stacks/${stackId}`, { method: "DELETE", headers: this._headers });
+    return { success: true, id: stackId };
+  },
+  // --- Cards ---
+  async listCards(boardId, stackId = null) {
+    if (!boardId) throw new Error("Board ID is required.");
+    const stacks = await this.listStacks(boardId);
+    const filtered = stackId !== null ? stacks.filter((s) => String(s.id) === String(stackId)) : stacks;
+    return filtered.flatMap((s) => s.cards.map((c) => ({ ...c, stackTitle: s.title })));
+  },
+  async getCard(boardId, stackId, cardId) {
+    if (!boardId || !stackId || !cardId) throw new Error("Board ID, Stack ID and Card ID are required.");
+    return await request(`${this._base}/boards/${boardId}/stacks/${stackId}/cards/${cardId}`, { headers: this._headers });
+  },
+  async createCard(boardId, stackId, title, options = {}) {
+    if (!boardId || !stackId) throw new Error("Board ID and Stack ID are required.");
+    if (!title || title.trim() === "") throw new Error("Title is required for creating a card.");
+    const payload = { title, type: "plain", order: options.order !== void 0 ? options.order : 999 };
+    if (options.description !== void 0) payload.description = options.description;
+    if (options.duedate !== void 0) payload.duedate = options.duedate;
+    const data = await request(`${this._base}/boards/${boardId}/stacks/${stackId}/cards`, {
+      method: "POST",
+      headers: this._jsonHeaders,
+      body: JSON.stringify(payload)
+    });
+    return this._normalizeCard(data);
+  },
+  async editCard(boardId, stackId, cardId, updates = {}) {
+    if (!boardId || !stackId || !cardId) throw new Error("Board ID, Stack ID and Card ID are required for update.");
+    const current = await this.getCard(boardId, stackId, cardId);
+    const payload = {
+      title: updates.title !== void 0 ? updates.title : current.title,
+      description: updates.description !== void 0 ? updates.description : current.description,
+      type: current.type || "plain",
+      owner: current.owner && current.owner.uid || current.owner,
+      order: updates.order !== void 0 ? updates.order : current.order,
+      duedate: updates.duedate !== void 0 ? updates.duedate : current.duedate
+    };
+    if (updates.done !== void 0) payload.done = updates.done;
+    else if (current.done) payload.done = current.done;
+    if (updates.archived !== void 0) payload.archived = updates.archived;
+    else payload.archived = current.archived;
+    const data = await request(`${this._base}/boards/${boardId}/stacks/${stackId}/cards/${cardId}`, {
+      method: "PUT",
+      headers: this._jsonHeaders,
+      body: JSON.stringify(payload)
+    });
+    return this._normalizeCard(data);
+  },
+  async deleteCard(boardId, stackId, cardId) {
+    if (!boardId || !stackId || !cardId) throw new Error("Board ID, Stack ID and Card ID are required for deletion.");
+    await request(`${this._base}/boards/${boardId}/stacks/${stackId}/cards/${cardId}`, { method: "DELETE", headers: this._headers });
+    return { success: true, id: cardId };
+  },
+  async moveCard(boardId, stackId, cardId, toStackId, order = 999) {
+    if (!boardId || !stackId || !cardId || !toStackId) {
+      throw new Error("Board ID, Stack ID, Card ID and target --to-stack are required for move.");
+    }
+    const data = await request(`${this._base}/boards/${boardId}/stacks/${toStackId}/cards/${cardId}/reorder`, {
+      method: "PUT",
+      headers: this._jsonHeaders,
+      body: JSON.stringify({ order, stackId: Number(toStackId) })
+    });
+    const moved = Array.isArray(data) ? data.find((c) => String(c.id) === String(cardId)) : data && data.cards ? data.cards.find((c) => String(c.id) === String(cardId)) : data;
+    return moved ? this._normalizeCard(moved) : { success: true, id: cardId, stackId: Number(toStackId) };
+  },
+  async assignLabel(boardId, stackId, cardId, labelId) {
+    if (!boardId || !stackId || !cardId || !labelId) throw new Error("Board, Stack, Card and Label IDs are required.");
+    await request(`${this._base}/boards/${boardId}/stacks/${stackId}/cards/${cardId}/assignLabel`, {
+      method: "PUT",
+      headers: this._jsonHeaders,
+      body: JSON.stringify({ labelId: Number(labelId) })
+    });
+    return { success: true, cardId, labelId, assigned: true };
+  },
+  async removeLabel(boardId, stackId, cardId, labelId) {
+    if (!boardId || !stackId || !cardId || !labelId) throw new Error("Board, Stack, Card and Label IDs are required.");
+    await request(`${this._base}/boards/${boardId}/stacks/${stackId}/cards/${cardId}/removeLabel`, {
+      method: "PUT",
+      headers: this._jsonHeaders,
+      body: JSON.stringify({ labelId: Number(labelId) })
+    });
+    return { success: true, cardId, labelId, assigned: false };
+  },
+  // --- Labels ---
+  async listLabels(boardId) {
+    if (!boardId) throw new Error("Board ID is required.");
+    const board = await this.getBoard(boardId);
+    return (board.labels || []).map((l) => ({ id: l.id, title: l.title, color: l.color, boardId: l.boardId }));
+  },
+  async createLabel(boardId, title, color) {
+    if (!boardId) throw new Error("Board ID is required.");
+    if (!title || title.trim() === "") throw new Error("Title is required for creating a label.");
+    if (!color) throw new Error("Color (hex, e.g. FF0000) is required for creating a label.");
+    const data = await request(`${this._base}/boards/${boardId}/labels`, {
+      method: "POST",
+      headers: this._jsonHeaders,
+      body: JSON.stringify({ title, color })
+    });
+    return { id: data.id, title: data.title, color: data.color, boardId: data.boardId };
+  },
+  async editLabel(boardId, labelId, updates = {}) {
+    if (!boardId || !labelId) throw new Error("Board ID and Label ID are required for update.");
+    const labels = await this.listLabels(boardId);
+    const current = labels.find((l) => String(l.id) === String(labelId));
+    if (!current) throw new Error(`Label ${labelId} not found on board ${boardId}.`);
+    const payload = {
+      title: updates.title !== void 0 ? updates.title : current.title,
+      color: updates.color !== void 0 ? updates.color : current.color
+    };
+    const data = await request(`${this._base}/boards/${boardId}/labels/${labelId}`, {
+      method: "PUT",
+      headers: this._jsonHeaders,
+      body: JSON.stringify(payload)
+    });
+    return { id: data.id, title: data.title, color: data.color, boardId: data.boardId };
+  },
+  async deleteLabel(boardId, labelId) {
+    if (!boardId || !labelId) throw new Error("Board ID and Label ID are required for deletion.");
+    await request(`${this._base}/boards/${boardId}/labels/${labelId}`, { method: "DELETE", headers: this._headers });
+    return { success: true, id: labelId };
+  },
+  // --- Comments (OCS Deck API) ---
+  _commentsBase(cardId) {
+    return `/ocs/v2.php/apps/deck/api/v1.0/cards/${cardId}/comments`;
+  },
+  _unwrapOcs(envelope) {
+    const meta = envelope && envelope.ocs && envelope.ocs.meta;
+    if (!meta || meta.status !== "ok" && meta.statuscode >= 300) {
+      throw new Error(`OCS error ${meta && meta.statuscode}: ${meta && meta.message}`);
+    }
+    return envelope.ocs.data;
+  },
+  async listComments(cardId) {
+    if (!cardId) throw new Error("Card ID is required.");
+    const envelope = await request(this._commentsBase(cardId), { headers: this._headers });
+    const data = this._unwrapOcs(envelope) || [];
+    return (Array.isArray(data) ? data : [data]).map((c) => ({
+      id: c.id,
+      message: c.message,
+      actorId: c.actorId,
+      actorDisplayName: c.actorDisplayName,
+      creationDateTime: c.creationDateTime
+    }));
+  },
+  async addComment(cardId, message) {
+    if (!cardId) throw new Error("Card ID is required.");
+    if (!message || message.trim() === "") throw new Error("Message is required for a comment.");
+    const envelope = await request(this._commentsBase(cardId), {
+      method: "POST",
+      headers: this._jsonHeaders,
+      body: JSON.stringify({ message })
+    });
+    const c = this._unwrapOcs(envelope);
+    return { id: c.id, message: c.message, actorId: c.actorId, creationDateTime: c.creationDateTime };
+  },
+  async deleteComment(cardId, commentId) {
+    if (!cardId || !commentId) throw new Error("Card ID and Comment ID are required for deletion.");
+    const envelope = await request(`${this._commentsBase(cardId)}/${commentId}`, {
+      method: "DELETE",
+      headers: this._headers
+    });
+    this._unwrapOcs(envelope);
+    return { success: true, id: commentId };
+  }
+};
 async function main() {
   const args = process.argv.slice(2);
   const command = args[0];
@@ -19084,8 +19371,182 @@ async function main() {
       } else {
         throw new Error("Unknown contacts command");
       }
+    } else if (command === "boards") {
+      if (subCommand === "list") {
+        output(await Deck.listBoards());
+      } else if (subCommand === "get") {
+        const boardIndex = args.indexOf("--board");
+        if (boardIndex === -1) throw new Error("Missing --board");
+        output(await Deck.getBoard(args[boardIndex + 1]));
+      } else if (subCommand === "create") {
+        const titleIndex = args.indexOf("--title");
+        if (titleIndex === -1) throw new Error("Missing --title");
+        const colorIndex = args.indexOf("--color");
+        const color = colorIndex !== -1 ? args[colorIndex + 1] : void 0;
+        output(await Deck.createBoard(args[titleIndex + 1], color));
+      } else if (subCommand === "edit") {
+        const boardIndex = args.indexOf("--board");
+        if (boardIndex === -1) throw new Error("Missing --board");
+        const updates = {};
+        const titleIndex = args.indexOf("--title");
+        if (titleIndex !== -1) updates.title = args[titleIndex + 1];
+        const colorIndex = args.indexOf("--color");
+        if (colorIndex !== -1) updates.color = args[colorIndex + 1];
+        const archivedIndex = args.indexOf("--archived");
+        if (archivedIndex !== -1) updates.archived = args[archivedIndex + 1] === "true";
+        output(await Deck.editBoard(args[boardIndex + 1], updates));
+      } else if (subCommand === "delete") {
+        const boardIndex = args.indexOf("--board");
+        if (boardIndex === -1) throw new Error("Missing --board");
+        output(await Deck.deleteBoard(args[boardIndex + 1]));
+      } else {
+        throw new Error("Unknown boards command");
+      }
+    } else if (command === "stacks") {
+      const boardIndex = args.indexOf("--board");
+      if (boardIndex === -1) throw new Error("Missing --board");
+      const boardId = args[boardIndex + 1];
+      if (subCommand === "list") {
+        output(await Deck.listStacks(boardId));
+      } else if (subCommand === "create") {
+        const titleIndex = args.indexOf("--title");
+        if (titleIndex === -1) throw new Error("Missing --title");
+        const orderIndex = args.indexOf("--order");
+        const order = orderIndex !== -1 ? Number(args[orderIndex + 1]) : void 0;
+        output(await Deck.createStack(boardId, args[titleIndex + 1], order));
+      } else if (subCommand === "edit") {
+        const stackIndex = args.indexOf("--stack");
+        if (stackIndex === -1) throw new Error("Missing --stack");
+        const updates = {};
+        const titleIndex = args.indexOf("--title");
+        if (titleIndex !== -1) updates.title = args[titleIndex + 1];
+        const orderIndex = args.indexOf("--order");
+        if (orderIndex !== -1) updates.order = Number(args[orderIndex + 1]);
+        output(await Deck.editStack(boardId, args[stackIndex + 1], updates));
+      } else if (subCommand === "delete") {
+        const stackIndex = args.indexOf("--stack");
+        if (stackIndex === -1) throw new Error("Missing --stack");
+        output(await Deck.deleteStack(boardId, args[stackIndex + 1]));
+      } else {
+        throw new Error("Unknown stacks command");
+      }
+    } else if (command === "cards") {
+      if (subCommand === "comment-list") {
+        const cardIndex = args.indexOf("--card");
+        if (cardIndex === -1) throw new Error("Missing --card");
+        output(await Deck.listComments(args[cardIndex + 1]));
+      } else if (subCommand === "comment-add") {
+        const cardIndex = args.indexOf("--card");
+        if (cardIndex === -1) throw new Error("Missing --card");
+        const msgIndex = args.indexOf("--message");
+        if (msgIndex === -1) throw new Error("Missing --message");
+        output(await Deck.addComment(args[cardIndex + 1], args[msgIndex + 1]));
+      } else if (subCommand === "comment-delete") {
+        const cardIndex = args.indexOf("--card");
+        if (cardIndex === -1) throw new Error("Missing --card");
+        const commentIndex = args.indexOf("--comment");
+        if (commentIndex === -1) throw new Error("Missing --comment");
+        output(await Deck.deleteComment(args[cardIndex + 1], args[commentIndex + 1]));
+      } else {
+        const boardIndex = args.indexOf("--board");
+        if (boardIndex === -1) throw new Error("Missing --board");
+        const boardId = args[boardIndex + 1];
+        const stackIndex = args.indexOf("--stack");
+        const cardIndex = args.indexOf("--card");
+        if (subCommand === "list") {
+          const stackId = stackIndex !== -1 ? args[stackIndex + 1] : null;
+          output(await Deck.listCards(boardId, stackId));
+        } else if (subCommand === "get") {
+          if (stackIndex === -1) throw new Error("Missing --stack");
+          if (cardIndex === -1) throw new Error("Missing --card");
+          output(await Deck.getCard(boardId, args[stackIndex + 1], args[cardIndex + 1]));
+        } else if (subCommand === "create") {
+          if (stackIndex === -1) throw new Error("Missing --stack");
+          const titleIndex = args.indexOf("--title");
+          if (titleIndex === -1) throw new Error("Missing --title");
+          const options = {};
+          const descIndex = args.indexOf("--description");
+          if (descIndex !== -1) options.description = args[descIndex + 1];
+          const dueIndex = args.indexOf("--duedate");
+          if (dueIndex !== -1) options.duedate = args[dueIndex + 1];
+          const orderIndex = args.indexOf("--order");
+          if (orderIndex !== -1) options.order = Number(args[orderIndex + 1]);
+          output(await Deck.createCard(boardId, args[stackIndex + 1], args[titleIndex + 1], options));
+        } else if (subCommand === "edit") {
+          if (stackIndex === -1) throw new Error("Missing --stack");
+          if (cardIndex === -1) throw new Error("Missing --card");
+          const updates = {};
+          const titleIndex = args.indexOf("--title");
+          if (titleIndex !== -1) updates.title = args[titleIndex + 1];
+          const descIndex = args.indexOf("--description");
+          if (descIndex !== -1) updates.description = args[descIndex + 1];
+          const dueIndex = args.indexOf("--duedate");
+          if (dueIndex !== -1) updates.duedate = args[dueIndex + 1];
+          const orderIndex = args.indexOf("--order");
+          if (orderIndex !== -1) updates.order = Number(args[orderIndex + 1]);
+          const doneIndex = args.indexOf("--done");
+          if (doneIndex !== -1) updates.done = args[doneIndex + 1] === "true" ? (/* @__PURE__ */ new Date()).toISOString() : null;
+          const archivedIndex = args.indexOf("--archived");
+          if (archivedIndex !== -1) updates.archived = args[archivedIndex + 1] === "true";
+          output(await Deck.editCard(boardId, args[stackIndex + 1], args[cardIndex + 1], updates));
+        } else if (subCommand === "delete") {
+          if (stackIndex === -1) throw new Error("Missing --stack");
+          if (cardIndex === -1) throw new Error("Missing --card");
+          output(await Deck.deleteCard(boardId, args[stackIndex + 1], args[cardIndex + 1]));
+        } else if (subCommand === "move") {
+          if (stackIndex === -1) throw new Error("Missing --stack");
+          if (cardIndex === -1) throw new Error("Missing --card");
+          const toIndex = args.indexOf("--to-stack");
+          if (toIndex === -1) throw new Error("Missing --to-stack");
+          const orderIndex = args.indexOf("--order");
+          const order = orderIndex !== -1 ? Number(args[orderIndex + 1]) : void 0;
+          output(await Deck.moveCard(boardId, args[stackIndex + 1], args[cardIndex + 1], args[toIndex + 1], order));
+        } else if (subCommand === "assign-label") {
+          if (stackIndex === -1) throw new Error("Missing --stack");
+          if (cardIndex === -1) throw new Error("Missing --card");
+          const labelIndex = args.indexOf("--label");
+          if (labelIndex === -1) throw new Error("Missing --label");
+          output(await Deck.assignLabel(boardId, args[stackIndex + 1], args[cardIndex + 1], args[labelIndex + 1]));
+        } else if (subCommand === "remove-label") {
+          if (stackIndex === -1) throw new Error("Missing --stack");
+          if (cardIndex === -1) throw new Error("Missing --card");
+          const labelIndex = args.indexOf("--label");
+          if (labelIndex === -1) throw new Error("Missing --label");
+          output(await Deck.removeLabel(boardId, args[stackIndex + 1], args[cardIndex + 1], args[labelIndex + 1]));
+        } else {
+          throw new Error("Unknown cards command");
+        }
+      }
+    } else if (command === "labels") {
+      const boardIndex = args.indexOf("--board");
+      if (boardIndex === -1) throw new Error("Missing --board");
+      const boardId = args[boardIndex + 1];
+      if (subCommand === "list") {
+        output(await Deck.listLabels(boardId));
+      } else if (subCommand === "create") {
+        const titleIndex = args.indexOf("--title");
+        if (titleIndex === -1) throw new Error("Missing --title");
+        const colorIndex = args.indexOf("--color");
+        if (colorIndex === -1) throw new Error("Missing --color");
+        output(await Deck.createLabel(boardId, args[titleIndex + 1], args[colorIndex + 1]));
+      } else if (subCommand === "edit") {
+        const labelIndex = args.indexOf("--label");
+        if (labelIndex === -1) throw new Error("Missing --label");
+        const updates = {};
+        const titleIndex = args.indexOf("--title");
+        if (titleIndex !== -1) updates.title = args[titleIndex + 1];
+        const colorIndex = args.indexOf("--color");
+        if (colorIndex !== -1) updates.color = args[colorIndex + 1];
+        output(await Deck.editLabel(boardId, args[labelIndex + 1], updates));
+      } else if (subCommand === "delete") {
+        const labelIndex = args.indexOf("--label");
+        if (labelIndex === -1) throw new Error("Missing --label");
+        output(await Deck.deleteLabel(boardId, args[labelIndex + 1]));
+      } else {
+        throw new Error("Unknown labels command");
+      }
     } else {
-      console.log("Usage: node index.js <notes|files|calendar|calendars|tasks|contacts|addressbooks|shares> <list|get|create|search|edit|delete|create-link> [options]");
+      console.log("Usage: node index.js <notes|files|calendar|calendars|tasks|contacts|addressbooks|shares|boards|stacks|cards|labels> <list|get|create|search|edit|delete|move|create-link> [options]");
     }
   } catch (err) {
     errorOutput(err);
