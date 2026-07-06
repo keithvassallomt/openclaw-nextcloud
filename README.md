@@ -4,7 +4,7 @@
 
 # OpenClaw Nextcloud Skill
 
-A Node.js CLI tool for interacting with Nextcloud services including notes, files, calendars, tasks, and contacts.
+A Node.js CLI tool for interacting with Nextcloud services including notes, files, calendars, tasks, contacts, and Deck Kanban boards.
 
 ## Features
 
@@ -13,6 +13,7 @@ A Node.js CLI tool for interacting with Nextcloud services including notes, file
 - **Calendar** - Manage calendar events via CalDAV
 - **Tasks** - Create and manage tasks/todos
 - **Contacts** - Full contact management via CardDAV
+- **Deck** - Manage Kanban boards, stacks, cards, labels, and comments via the Deck API
 
 ## Prerequisites
 
@@ -45,6 +46,13 @@ npm run build            # Bundle into scripts/nextcloud.js
 ```
 
 Both files should be committed - the bundle allows users/agents to run the skill without npm install.
+
+With [Nix](https://nixos.org/), a `flake.nix` provides the toolchain (Node.js + esbuild):
+
+```bash
+nix shell .#default --command npm install
+nix shell .#default --command npm run build
+```
 
 ## Configuration
 Store these values in environment variables, or openclawd.json, or use a .env file.
@@ -194,6 +202,51 @@ node scripts/nextcloud.js contacts edit --uid contact-uid --email "newemail@exam
 node scripts/nextcloud.js contacts delete --uid contact-uid
 ```
 
+### Deck (Kanban)
+
+```bash
+# List boards
+node scripts/nextcloud.js boards list
+
+# Create a board
+node scripts/nextcloud.js boards create --title "Sprint" --color 0082c9
+
+# Show a board with its stacks and labels
+node scripts/nextcloud.js boards get --board 6
+
+# List stacks (columns) with their cards nested
+node scripts/nextcloud.js stacks list --board 6
+
+# Create a stack (column)
+node scripts/nextcloud.js stacks create --board 6 --title "To do"
+
+# Create a card
+node scripts/nextcloud.js cards create --board 6 --stack 15 --title "Buy LED ring" --description "5.8cm - 8cm"
+
+# List cards on a board (optionally within one stack)
+node scripts/nextcloud.js cards list --board 6 --stack 15
+
+# Edit a card (rename, set due date, mark done)
+node scripts/nextcloud.js cards edit --board 6 --stack 15 --card 73 --title "Buy LED ring (8cm)" --done true
+
+# Move a card to another stack
+node scripts/nextcloud.js cards move --board 6 --stack 15 --card 73 --to-stack 17
+
+# Labels: create on a board, then assign/remove on a card
+node scripts/nextcloud.js labels create --board 6 --title "Urgent" --color FF0000
+node scripts/nextcloud.js cards assign-label --board 6 --stack 17 --card 73 --label 41
+node scripts/nextcloud.js cards remove-label --board 6 --stack 17 --card 73 --label 41
+
+# Card comments (card ids are globally unique)
+node scripts/nextcloud.js cards comment-add --card 73 --message "Ordered today"
+node scripts/nextcloud.js cards comment-list --card 73
+
+# Delete a card
+node scripts/nextcloud.js cards delete --board 6 --stack 17 --card 73
+```
+
+Deleting a board (`boards delete --board <id>`) is a soft-delete on the Nextcloud side; the board stops appearing in `boards list` and is purged by the server.
+
 ## Output Format
 
 All commands return JSON output:
@@ -225,6 +278,7 @@ This tool uses the following Nextcloud APIs:
 | Calendar/Tasks | CalDAV | `/remote.php/dav/calendars/` |
 | Contacts | CardDAV | `/remote.php/dav/addressbooks/` |
 | Shares | OCS | `/ocs/v2.php/apps/files_sharing/api/v1/shares` |
+| Deck | REST | `/index.php/apps/deck/api/v1.1/` |
 
 ## Dependencies
 
