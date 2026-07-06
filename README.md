@@ -334,6 +334,7 @@ Thanks to:
 
 - [@schemann](https://github.com/schemann) — `fileId` / `internalLink` on file listings, auto-MKCOL on upload, public-link shares (`shares list` / `create-link` / `delete`).
 - [@KssimiClaw](https://github.com/KssimiClaw) — fix for `files search` 501 by routing the WebDAV `SEARCH` request to the DAV root.
+- [@makefu](https://github.com/makefu) - Kanban Boards support.
 
 ## License
 
