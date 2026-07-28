@@ -410,9 +410,10 @@ This tool uses the following Nextcloud APIs:
 
 ## Dependencies
 
-- [node-fetch](https://www.npmjs.com/package/node-fetch) - HTTP client
 - [fast-xml-parser](https://www.npmjs.com/package/fast-xml-parser) - XML parsing
 - [date-fns](https://www.npmjs.com/package/date-fns) - Date formatting
+
+HTTP requests use Node's built-in `fetch`; there is no HTTP client dependency.
 
 ## Security & Trust
 
@@ -440,7 +441,7 @@ A static analyser scanning this skill will likely flag rules in the family of `s
 
 **Auditing the bundle**
 
-`scripts/nextcloud.js` is the output of running `esbuild` over `index.js` plus the three declared dependencies. To verify the bundle matches the source:
+`scripts/nextcloud.js` is the output of running `esbuild` over `index.js` plus the two declared dependencies. To verify the bundle matches the source:
 
 ```bash
 npm install
