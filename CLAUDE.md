@@ -13,12 +13,16 @@ The project uses a **bundled architecture**: source lives in `index.js` and is b
 ```bash
 npm install               # only needed for development (esbuild)
 npm run build             # bundles index.js -> scripts/nextcloud.js
+npm test                  # loopback-only regression suite
 node scripts/nextcloud.js <command> <subcommand> [options]
 ```
 
 **Always commit both `index.js` and the rebuilt `scripts/nextcloud.js` together** — shipping only the source breaks the no-install promise that the skill depends on.
 
-There is no test suite, linter, or typechecker configured. Verify changes by running `node scripts/nextcloud.js <cmd>` against a live Nextcloud instance with `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_TOKEN` set.
+There is no linter or typechecker configured. Run `npm test` for the
+loopback-only regression suite. Live Nextcloud verification is still useful
+for protocol compatibility when credentials and a safe test account are
+available.
 
 ## Architecture
 

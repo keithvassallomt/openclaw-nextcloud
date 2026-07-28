@@ -166,11 +166,11 @@ function encodePathSegments(decodedPath) {
 // Additionally strip raw CR/LF to prevent property-line injection.
 function escapePropertyValue(value) {
     if (typeof value !== 'string') return String(value);
-    // Strip raw newlines and carriage returns — these cannot appear
-    // literally in a folded property value and are the primary injection vector.
-    let escaped = value.replace(/\r\n/g, '\\n').replace(/\n/g, '\\n').replace(/\r/g, '\\n');
-    // Escape backslash first so we don't double-escape
-    escaped = escaped.replace(/\\/g, '\\\\');
+    // Escape existing backslashes before introducing the backslash-n sequence
+    // used for newlines. This prevents both property injection and accidental
+    // double-escaping of the newline marker.
+    let escaped = value.replace(/\\/g, '\\\\');
+    escaped = escaped.replace(/\r\n/g, '\\n').replace(/\n/g, '\\n').replace(/\r/g, '\\n');
     // Escape semicolons and commas which delimit structured values
     escaped = escaped.replace(/;/g, '\\;').replace(/,/g, '\\,');
     return escaped;
@@ -1208,7 +1208,7 @@ const Contacts = {
         const cleanValue = (val) => val ? val.replace(/&#13;/g, '').replace(/\r/g, '').trim() : null;
 
         const getField = (field) => {
-            const regex = new RegExp(`^(?:[^.]+\\.)?${field}(?:;[^:]*)?:(.*)$`, 'mi');
+            const regex = new RegExp(`^(?:[A-Za-z0-9-]+\\.)?${field}(?:;[^:\\r\\n]*)?:(.*)$`, 'mi');
             const match = vcard.match(regex);
             return match ? cleanValue(match[1]) : null;
         };
@@ -1219,7 +1219,7 @@ const Contacts = {
 
         // Parse phone numbers (can have multiple)
         const phones = [];
-        const phoneRegex = /^(?:[^.]+\.)?TEL(?:;[^:]*)?:(.*)$/gmi;
+        const phoneRegex = /^(?:[A-Za-z0-9-]+\.)?TEL(?:;[^:\r\n]*)?:(.*)$/gmi;
         let phoneMatch;
         while ((phoneMatch = phoneRegex.exec(vcard)) !== null) {
             phones.push(cleanValue(phoneMatch[1]));
@@ -1227,7 +1227,7 @@ const Contacts = {
 
         // Parse emails (can have multiple)
         const emails = [];
-        const emailRegex = /^(?:[^.]+\.)?EMAIL(?:;[^:]*)?:(.*)$/gmi;
+        const emailRegex = /^(?:[A-Za-z0-9-]+\.)?EMAIL(?:;[^:\r\n]*)?:(.*)$/gmi;
         let emailMatch;
         while ((emailMatch = emailRegex.exec(vcard)) !== null) {
             emails.push(cleanValue(emailMatch[1]));
@@ -1352,7 +1352,7 @@ const Contacts = {
     },
 
     _updateVCardField(vcard, field, value) {
-        const regex = new RegExp(`^((?:[^.]+\\.)?${field}(?:;[^:]*)?:).*$`, 'mi');
+        const regex = new RegExp(`^((?:[A-Za-z0-9-]+\\.)?${field}(?:;[^:\\r\\n]*)?:).*$`, 'mi');
         const newLine = `${field}:${value}`;
         if (regex.test(vcard)) {
             return vcard.replace(regex, (match, prefix) => `${prefix}${value}`);

@@ -17711,8 +17711,8 @@ function encodePathSegments(decodedPath) {
 }
 function escapePropertyValue(value) {
   if (typeof value !== "string") return String(value);
-  let escaped = value.replace(/\r\n/g, "\\n").replace(/\n/g, "\\n").replace(/\r/g, "\\n");
-  escaped = escaped.replace(/\\/g, "\\\\");
+  let escaped = value.replace(/\\/g, "\\\\");
+  escaped = escaped.replace(/\r\n/g, "\\n").replace(/\n/g, "\\n").replace(/\r/g, "\\n");
   escaped = escaped.replace(/;/g, "\\;").replace(/,/g, "\\,");
   return escaped;
 }
@@ -18602,7 +18602,7 @@ var Contacts = {
   _parseVCard(vcard) {
     const cleanValue = (val) => val ? val.replace(/&#13;/g, "").replace(/\r/g, "").trim() : null;
     const getField = (field) => {
-      const regex = new RegExp(`^${field}(?:;[^:]*)?:(.*)$`, "mi");
+      const regex = new RegExp(`^(?:[A-Za-z0-9-]+\\.)?${field}(?:;[^:\\r\\n]*)?:(.*)$`, "mi");
       const match = vcard.match(regex);
       return match ? cleanValue(match[1]) : null;
     };
@@ -18610,13 +18610,13 @@ var Contacts = {
     const fn = getField("FN");
     const n = getField("N");
     const phones = [];
-    const phoneRegex = /^TEL(?:;[^:]*)?:(.*)$/gmi;
+    const phoneRegex = /^(?:[A-Za-z0-9-]+\.)?TEL(?:;[^:\r\n]*)?:(.*)$/gmi;
     let phoneMatch;
     while ((phoneMatch = phoneRegex.exec(vcard)) !== null) {
       phones.push(cleanValue(phoneMatch[1]));
     }
     const emails = [];
-    const emailRegex = /^EMAIL(?:;[^:]*)?:(.*)$/gmi;
+    const emailRegex = /^(?:[A-Za-z0-9-]+\.)?EMAIL(?:;[^:\r\n]*)?:(.*)$/gmi;
     let emailMatch;
     while ((emailMatch = emailRegex.exec(vcard)) !== null) {
       emails.push(cleanValue(emailMatch[1]));
@@ -18733,10 +18733,10 @@ FN:${escapedFn}
     return { uid, status: "created", addressBook: ab.displayname };
   },
   _updateVCardField(vcard, field, value) {
-    const regex = new RegExp(`^${field}(?:;[^:]*)?:.*$`, "mi");
+    const regex = new RegExp(`^((?:[A-Za-z0-9-]+\\.)?${field}(?:;[^:\\r\\n]*)?:).*$`, "mi");
     const newLine = `${field}:${value}`;
     if (regex.test(vcard)) {
-      return vcard.replace(regex, newLine);
+      return vcard.replace(regex, (match, prefix) => `${prefix}${value}`);
     } else {
       return vcard.replace("END:VCARD", `${newLine}
 END:VCARD`);
