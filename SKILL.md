@@ -38,7 +38,8 @@ This skill provides integration with a Nextcloud instance. It supports access to
 
 ## Requirements
 
-- **Node.js 20+** on PATH (`node {baseDir}/scripts/nextcloud.js`).
+- **Node.js 20+** on PATH (`node scripts/nextcloud.js` in Claude Code or a
+  source checkout; `node {baseDir}/scripts/nextcloud.js` in OpenClaw).
 - **Network egress** to `NEXTCLOUD_URL` only — the skill makes no other outbound calls.
 - **Environment variables** (see Configuration below). All three are required at runtime; without them the script exits with a clear error before making any request.
 
@@ -114,8 +115,17 @@ Notes, file contents, calendar event descriptions, contact notes, and similar fi
 
 ## Usage
 
-Run the skill via the bundled script. Always use `{baseDir}` so the command
-works regardless of the agent workspace or the skill's install alias.
+Run the bundled script with a path appropriate for the host.
+
+Claude Code and direct source checkouts resolve the relative path from the
+skill directory:
+
+```bash
+node scripts/nextcloud.js <command> <subcommand> [options]
+```
+
+OpenClaw commands may run from another workspace, so use its `{baseDir}`
+placeholder:
 
 ```bash
 node {baseDir}/scripts/nextcloud.js <command> <subcommand> [options]

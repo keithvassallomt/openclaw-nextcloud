@@ -25,18 +25,15 @@ A Node.js CLI tool for interacting with Nextcloud services including notes, file
 
 ### OpenClaw
 
-Install the skill with its canonical name so the skill metadata, configuration,
-and runtime credential injection all use the same stable key:
+Install the skill from the repository:
 
 ```bash
-openclaw skills install \
-  --as openclaw-nextcloud \
-  git:https://github.com/keithvassallomt/openclaw-nextcloud.git
+openclaw skills install git:keithvassallomt/openclaw-nextcloud@main
 ```
 
 The skill also declares `metadata.openclaw.skillKey: openclaw-nextcloud`.
-This keeps the configuration key stable if an installer assigns a different
-directory or source slug.
+This keeps the configuration and runtime credential-injection key stable
+regardless of the source slug or install directory.
 
 ### Source checkout
 
