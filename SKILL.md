@@ -6,6 +6,7 @@ allowed-tools: Bash Read
 metadata:
   openclaw:
     version: 0.3.0
+    skillKey: openclaw-nextcloud
     requires:
       env:
         - NEXTCLOUD_URL

@@ -23,6 +23,23 @@ A Node.js CLI tool for interacting with Nextcloud services including notes, file
 
 ## Installation
 
+### OpenClaw
+
+Install the skill with its canonical name so the skill metadata, configuration,
+and runtime credential injection all use the same stable key:
+
+```bash
+openclaw skills install \
+  --as openclaw-nextcloud \
+  git:https://github.com/keithvassallomt/openclaw-nextcloud.git
+```
+
+The skill also declares `metadata.openclaw.skillKey: openclaw-nextcloud`.
+This keeps the configuration key stable if an installer assigns a different
+directory or source slug.
+
+### Source checkout
+
 ```bash
 git clone https://github.com/keithvassallomt/openclaw-nextcloud.git
 cd openclaw-nextcloud
@@ -55,7 +72,27 @@ nix shell .#default --command npm run build
 ```
 
 ## Configuration
-Store these values in environment variables, or openclawd.json, or use a .env file.
+
+For an OpenClaw installation, configure the non-secret values under the
+canonical skill key:
+
+```bash
+openclaw config set \
+  skills.entries.openclaw-nextcloud.env.NEXTCLOUD_URL \
+  https://your-nextcloud-instance.com
+openclaw config set \
+  skills.entries.openclaw-nextcloud.env.NEXTCLOUD_USER \
+  your_username
+```
+
+Save the app password through **Control UI → Skills → openclaw-nextcloud →
+Save key**. OpenClaw stores it as the skill's `apiKey` and injects it as
+`NEXTCLOUD_TOKEN` only for agent runs. Prefer a supported OpenClaw SecretRef
+when managing credentials outside the Control UI. Do not put the app password
+in prompts, shell history, examples, or logs.
+
+For direct CLI use outside OpenClaw, provide the same values as environment
+variables:
 
 ```env
 NEXTCLOUD_URL=https://your-nextcloud-instance.com
@@ -67,7 +104,27 @@ NEXTCLOUD_TOKEN=your_app_password
 1. Log into your Nextcloud instance
 2. Go to Settings → Security
 3. Under "Devices & sessions", enter a name for the app and click "Create new app password"
-4. Copy the generated password to your `.env` file
+4. Save the generated password as described above
+
+### Verify runtime injection
+
+First confirm that OpenClaw considers the skill ready:
+
+```bash
+openclaw skills info openclaw-nextcloud
+```
+
+Then perform a read-only agent check. The check should inspect presence only,
+must not read configuration files, and must never print credential values:
+
+```bash
+openclaw agent --agent main --message \
+  "Without reading config files or printing values, report whether NEXTCLOUD_URL, NEXTCLOUD_USER, and NEXTCLOUD_TOKEN are present. If all are present, use the Nextcloud skill to list calendars only. Make no changes."
+```
+
+If readiness succeeds but the agent reports missing variables, verify that the
+installed skill resolves to `skillKey: openclaw-nextcloud` and that the config
+entry uses `skills.entries.openclaw-nextcloud`.
 
 ## Usage
 
