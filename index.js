@@ -125,12 +125,15 @@ function sanitizePath(filePath) {
     if (typeof filePath !== 'string' || filePath === '') {
         throw new Error('File path must be a non-empty string.');
     }
-    // Decode once to catch percent-encoded traversal (e.g. %2e%2e%2f)
+    // Preserve literal percent signs while still decoding valid escapes once
+    // to catch encoded traversal (e.g. %2e%2e%2f). If otherwise valid-looking
+    // escapes are not valid UTF-8, treat the path as a literal filename.
+    const normalizedPercentEncoding = filePath.replace(/%(?![0-9A-Fa-f]{2})/g, '%25');
     let decoded;
     try {
-        decoded = decodeURIComponent(filePath);
+        decoded = decodeURIComponent(normalizedPercentEncoding);
     } catch {
-        throw new Error('File path contains invalid percent-encoding.');
+        decoded = filePath;
     }
     // Reject complete dot-segments after decoding. Both "." and ".." are
     // normalized by URL clients and can otherwise alias a different DAV target.
@@ -172,6 +175,23 @@ function escapePropertyValue(value) {
     // Escape semicolons and commas which delimit structured values
     escaped = escaped.replace(/;/g, '\\;').replace(/,/g, '\\,');
     return escaped;
+}
+
+// Decode one layer of RFC 5545 / RFC 6350 text escaping when returning
+// calendar and contact values to callers. A single-pass replacement avoids
+// interpreting escape sequences that were themselves escaped in the source.
+function unescapePropertyValue(value) {
+    if (value === null || value === undefined) return value;
+    return String(value).replace(/\\([\\;,nN])/g, (_, char) =>
+        char === 'n' || char === 'N' ? '\n' : char
+    );
+}
+
+function parsePriorityInput(value) {
+    if (!/^[0-9]$/.test(String(value))) {
+        throw new Error('Priority must be an integer from 0 to 9.');
+    }
+    return String(value);
 }
 
 function ensureArray(item) {
@@ -604,11 +624,11 @@ const CalDAV = {
                      allEvents.push({
                          uid: uidMatch ? uidMatch[1].trim() : 'No UID',
                          calendar: cal.displayname,
-                         summary: summaryMatch ? summaryMatch[1].trim() : 'No Title',
-                         description: descriptionMatch ? descriptionMatch[1].trim() : null,
+                         summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : 'No Title',
+                         description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
                          start: dtstartMatch ? dtstartMatch[1].trim() : 'Unknown',
                          end: dtendMatch ? dtendMatch[1].trim() : null,
-                         location: locationMatch ? locationMatch[1].trim() : null
+                         location: locationMatch ? unescapePropertyValue(locationMatch[1].trim()) : null
                      });
                  }
              } catch (e) {
@@ -680,8 +700,8 @@ const CalDAV = {
                      allTodos.push({
                          uid: uidMatch ? uidMatch[1].trim() : 'No UID',
                          calendar: cal.displayname,
-                         summary: summaryMatch ? summaryMatch[1].trim() : 'No Title',
-                         description: descriptionMatch ? descriptionMatch[1].trim() : null,
+                         summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : 'No Title',
+                         description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
                          status: statusMatch ? statusMatch[1].trim() : 'NEEDS-ACTION',
                          due: dueMatch ? dueMatch[1].trim() : null,
                          priority: priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : null
@@ -779,13 +799,13 @@ const CalDAV = {
         const regex = new RegExp(`^${prop}(?:;[^:\\r\\n]*)?:.*$`, 'm');
         const newLine = `${prop}:${value}`;
         if (regex.test(vcal)) {
-            return vcal.replace(regex, newLine);
+            return vcal.replace(regex, () => newLine);
         }
         const endMatch = vcal.match(/END:(VTODO|VEVENT)/);
         if (!endMatch) {
             throw new Error('Cannot insert property: no END:VTODO or END:VEVENT found in calendar data.');
         }
-        return vcal.replace(endMatch[0], `${newLine}\n${endMatch[0]}`);
+        return vcal.replace(endMatch[0], () => `${newLine}\n${endMatch[0]}`);
     },
 
     async createTask(title, calendarName, dueDate, priority, description) {
@@ -1203,7 +1223,9 @@ const Contacts = {
 
     _parseVCard(vcard) {
         // Normalize line endings (vCard uses CRLF, and XML may encode CR as &#13;)
-        const cleanValue = (val) => val ? val.replace(/&#13;/g, '').replace(/\r/g, '').trim() : null;
+        const cleanValue = (val) => val
+            ? unescapePropertyValue(val.replace(/&#13;/g, '').replace(/\r/g, '').trim())
+            : null;
 
         const getField = (field) => {
             const regex = new RegExp(`^(?:[A-Za-z0-9-]+\\.)?${field}(?:;[^:\\r\\n]*)?:(.*)$`, 'mi');
@@ -1355,7 +1377,7 @@ const Contacts = {
         if (regex.test(vcard)) {
             return vcard.replace(regex, (match, prefix) => `${prefix}${value}`);
         } else {
-            return vcard.replace('END:VCARD', `${newLine}\nEND:VCARD`);
+            return vcard.replace('END:VCARD', () => `${newLine}\nEND:VCARD`);
         }
     },
 
@@ -1975,7 +1997,9 @@ async function main() {
                 const dueDate = dueIndex !== -1 ? args[dueIndex + 1] : null;
 
                 const prioIndex = args.indexOf('--priority');
-                const priority = prioIndex !== -1 ? args[prioIndex + 1] : null;
+                const priority = prioIndex !== -1
+                    ? parsePriorityInput(args[prioIndex + 1])
+                    : null;
 
                 const descIndex = args.indexOf('--description');
                 const description = descIndex !== -1 ? args[descIndex + 1] : null;
@@ -1998,7 +2022,9 @@ async function main() {
                 if (dueIndex !== -1) updates.dueDate = args[dueIndex + 1];
                 
                 const prioIndex = args.indexOf('--priority');
-                if (prioIndex !== -1) updates.priority = args[prioIndex + 1];
+                if (prioIndex !== -1) {
+                    updates.priority = parsePriorityInput(args[prioIndex + 1]);
+                }
                 
                 const descIndex = args.indexOf('--description');
                 if (descIndex !== -1) updates.description = args[descIndex + 1];

@@ -41,10 +41,49 @@ const groupedContactReport = `<?xml version="1.0" encoding="utf-8"?>
       <card:address-data>BEGIN:VCARD
 VERSION:3.0
 UID:grouped
-FN:Grouped Contact
+FN:Grouped\\, Contact
 item1.EMAIL;TYPE=work:grouped@example.com
 item2.TEL:+15551234567
 END:VCARD</card:address-data>
+    </d:prop></d:propstat>
+  </d:response>
+</d:multistatus>`;
+
+const eventReport = `<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/remote.php/dav/calendars/tester/personal/event.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"event"</d:getetag>
+      <cal:calendar-data>BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:event-1
+SUMMARY:Quarterly\\, Review
+DESCRIPTION:Line one\\nLine two
+LOCATION:Room\\; 2
+DTSTART:20260728T120000Z
+DTEND:20260728T130000Z
+END:VEVENT
+END:VCALENDAR</cal:calendar-data>
+    </d:prop></d:propstat>
+  </d:response>
+</d:multistatus>`;
+
+const todoReport = `<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/remote.php/dav/calendars/tester/personal/task.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"task"</d:getetag>
+      <cal:calendar-data>BEGIN:VCALENDAR
+BEGIN:VTODO
+UID:task-1
+SUMMARY:Call Alice\\, Bob
+DESCRIPTION:First line\\nSecond line
+STATUS:NEEDS-ACTION
+PRIORITY:5
+END:VTODO
+END:VCALENDAR</cal:calendar-data>
     </d:prop></d:propstat>
   </d:response>
 </d:multistatus>`;
@@ -67,6 +106,10 @@ const server = http.createServer(async (req, res) => {
              req.url === '/remote.php/dav/addressbooks/users/tester/contacts/') {
     res.setHeader('content-type', 'application/xml');
     res.end(groupedContactReport);
+  } else if (req.method === 'REPORT' &&
+             req.url === '/remote.php/dav/calendars/tester/personal/') {
+    res.setHeader('content-type', 'application/xml');
+    res.end(body.includes('VTODO') ? todoReport : eventReport);
   } else {
     res.setHeader('content-type', 'text/plain');
     res.end('ok');
@@ -98,6 +141,7 @@ function record(name, passed, details = {}) {
   tests.push({ name, passed, ...details });
 }
 
+try {
 for (const filePath of [
   '.',
   './',
@@ -132,6 +176,17 @@ record(
 );
 
 before = requests.length;
+result = await run(['files', 'delete', '--path', 'reports/100% done.txt']);
+record(
+  'literal percent signs are preserved and encoded in DAV paths',
+  result.code === 0 &&
+    requests.length === before + 1 &&
+    requests.at(-1)?.url ===
+      '/remote.php/dav/files/tester/reports/100%25%20done.txt',
+  { request: requests.at(-1), result }
+);
+
+before = requests.length;
 result = await run([
   'calendar', 'create',
   '--summary', 'Team\nATTENDEE:mailto:attacker@example.com',
@@ -152,6 +207,58 @@ record(
   { body: eventPut?.body ?? null, result }
 );
 
+result = await run([
+  'calendar', 'list',
+  '--from', '2026-07-28T00:00:00Z',
+  '--to', '2026-07-29T00:00:00Z'
+]);
+let listedEvent = null;
+try {
+  listedEvent = JSON.parse(result.stdout)?.data?.[0] ?? null;
+} catch {
+  // The assertion below preserves the parse failure as test evidence.
+}
+record(
+  'calendar text values are unescaped when read',
+  result.code === 0 &&
+    listedEvent?.summary === 'Quarterly, Review' &&
+    listedEvent?.description === 'Line one\nLine two' &&
+    listedEvent?.location === 'Room; 2',
+  { listedEvent, result }
+);
+
+result = await run(['tasks', 'list', '--calendar', 'Personal']);
+let listedTask = null;
+try {
+  listedTask = JSON.parse(result.stdout)?.data?.[0] ?? null;
+} catch {
+  // The assertion below preserves the parse failure as test evidence.
+}
+record(
+  'task text values are unescaped when read',
+  result.code === 0 &&
+    listedTask?.summary === 'Call Alice, Bob' &&
+    listedTask?.description === 'First line\nSecond line',
+  { listedTask, result }
+);
+
+before = requests.length;
+result = await run([
+  'calendar', 'edit',
+  '--uid', 'event-1',
+  '--calendar', 'Personal',
+  '--summary', 'Budget $& $1'
+]);
+const updatedEventPut = requests
+  .slice(before)
+  .find(entry => entry.method === 'PUT');
+record(
+  'calendar edits preserve dollar replacement tokens literally',
+  result.code === 0 &&
+    updatedEventPut?.body.includes('SUMMARY:Budget $& $1'),
+  { body: updatedEventPut?.body ?? null, result }
+);
+
 result = await run(['contacts', 'list']);
 let groupedContact = null;
 try {
@@ -162,6 +269,7 @@ try {
 record(
   'grouped vCard EMAIL and TEL properties parse',
   result.code === 0 &&
+    groupedContact?.fullName === 'Grouped, Contact' &&
     groupedContact?.emails?.[0] === 'grouped@example.com' &&
     groupedContact?.phones?.[0] === '+15551234567',
   { groupedContact, result }
@@ -185,7 +293,37 @@ record(
   { emailLines, result }
 );
 
-server.close();
+before = requests.length;
+result = await run([
+  'contacts', 'edit',
+  '--uid', 'grouped',
+  '--note', 'Budget $& $1'
+]);
+const notePut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'inserted vCard fields preserve dollar replacement tokens literally',
+  result.code === 0 &&
+    notePut?.body.includes('NOTE:Budget $& $1\nEND:VCARD'),
+  { body: notePut?.body ?? null, result }
+);
+
+for (const [subcommand, args] of [
+  ['create', ['--title', 'Invalid priority', '--priority', '10']],
+  ['edit', ['--uid', 'task-1', '--priority', '-1']]
+]) {
+  before = requests.length;
+  result = await run(['tasks', subcommand, ...args]);
+  record(
+    `tasks ${subcommand} rejects priorities outside 0-9 before a request`,
+    result.code !== 0 &&
+      result.stderr.includes('Priority must be an integer from 0 to 9') &&
+      requests.length === before,
+    { result }
+  );
+}
+} finally {
+  await new Promise(resolveClose => server.close(resolveClose));
+}
 
 for (const test of tests) {
   console.log(`${test.passed ? 'PASS' : 'FAIL'} ${test.name}`);

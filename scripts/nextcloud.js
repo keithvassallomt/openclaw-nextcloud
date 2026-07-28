@@ -17686,11 +17686,12 @@ function sanitizePath(filePath) {
   if (typeof filePath !== "string" || filePath === "") {
     throw new Error("File path must be a non-empty string.");
   }
+  const normalizedPercentEncoding = filePath.replace(/%(?![0-9A-Fa-f]{2})/g, "%25");
   let decoded;
   try {
-    decoded = decodeURIComponent(filePath);
+    decoded = decodeURIComponent(normalizedPercentEncoding);
   } catch {
-    throw new Error("File path contains invalid percent-encoding.");
+    decoded = filePath;
   }
   const decodedSegments = decoded.split("/");
   if (decodedSegments.some((segment) => segment === "." || segment === "..")) {
@@ -17713,6 +17714,19 @@ function escapePropertyValue(value) {
   escaped = escaped.replace(/\r\n/g, "\\n").replace(/\n/g, "\\n").replace(/\r/g, "\\n");
   escaped = escaped.replace(/;/g, "\\;").replace(/,/g, "\\,");
   return escaped;
+}
+function unescapePropertyValue(value) {
+  if (value === null || value === void 0) return value;
+  return String(value).replace(
+    /\\([\\;,nN])/g,
+    (_, char) => char === "n" || char === "N" ? "\n" : char
+  );
+}
+function parsePriorityInput(value) {
+  if (!/^[0-9]$/.test(String(value))) {
+    throw new Error("Priority must be an integer from 0 to 9.");
+  }
+  return String(value);
 }
 function ensureArray(item) {
   if (Array.isArray(item)) return item;
@@ -18064,11 +18078,11 @@ var CalDAV = {
           allEvents.push({
             uid: uidMatch ? uidMatch[1].trim() : "No UID",
             calendar: cal.displayname,
-            summary: summaryMatch ? summaryMatch[1].trim() : "No Title",
-            description: descriptionMatch ? descriptionMatch[1].trim() : null,
+            summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : "No Title",
+            description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
             start: dtstartMatch ? dtstartMatch[1].trim() : "Unknown",
             end: dtendMatch ? dtendMatch[1].trim() : null,
-            location: locationMatch ? locationMatch[1].trim() : null
+            location: locationMatch ? unescapePropertyValue(locationMatch[1].trim()) : null
           });
         }
       } catch (e) {
@@ -18130,8 +18144,8 @@ var CalDAV = {
           allTodos.push({
             uid: uidMatch ? uidMatch[1].trim() : "No UID",
             calendar: cal.displayname,
-            summary: summaryMatch ? summaryMatch[1].trim() : "No Title",
-            description: descriptionMatch ? descriptionMatch[1].trim() : null,
+            summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : "No Title",
+            description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
             status: statusMatch ? statusMatch[1].trim() : "NEEDS-ACTION",
             due: dueMatch ? dueMatch[1].trim() : null,
             priority: priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : null
@@ -18218,13 +18232,13 @@ var CalDAV = {
     const regex = new RegExp(`^${prop}(?:;[^:\\r\\n]*)?:.*$`, "m");
     const newLine = `${prop}:${value}`;
     if (regex.test(vcal)) {
-      return vcal.replace(regex, newLine);
+      return vcal.replace(regex, () => newLine);
     }
     const endMatch = vcal.match(/END:(VTODO|VEVENT)/);
     if (!endMatch) {
       throw new Error("Cannot insert property: no END:VTODO or END:VEVENT found in calendar data.");
     }
-    return vcal.replace(endMatch[0], `${newLine}
+    return vcal.replace(endMatch[0], () => `${newLine}
 ${endMatch[0]}`);
   },
   async createTask(title, calendarName, dueDate, priority, description) {
@@ -18598,7 +18612,7 @@ var Contacts = {
     return allContacts;
   },
   _parseVCard(vcard) {
-    const cleanValue = (val) => val ? val.replace(/&#13;/g, "").replace(/\r/g, "").trim() : null;
+    const cleanValue = (val) => val ? unescapePropertyValue(val.replace(/&#13;/g, "").replace(/\r/g, "").trim()) : null;
     const getField = (field) => {
       const regex = new RegExp(`^(?:[A-Za-z0-9-]+\\.)?${field}(?:;[^:\\r\\n]*)?:(.*)$`, "mi");
       const match = vcard.match(regex);
@@ -18736,7 +18750,7 @@ FN:${escapedFn}
     if (regex.test(vcard)) {
       return vcard.replace(regex, (match, prefix) => `${prefix}${value}`);
     } else {
-      return vcard.replace("END:VCARD", `${newLine}
+      return vcard.replace("END:VCARD", () => `${newLine}
 END:VCARD`);
     }
   },
@@ -19268,7 +19282,7 @@ async function main() {
         const dueIndex = args.indexOf("--due");
         const dueDate = dueIndex !== -1 ? args[dueIndex + 1] : null;
         const prioIndex = args.indexOf("--priority");
-        const priority = prioIndex !== -1 ? args[prioIndex + 1] : null;
+        const priority = prioIndex !== -1 ? parsePriorityInput(args[prioIndex + 1]) : null;
         const descIndex = args.indexOf("--description");
         const description = descIndex !== -1 ? args[descIndex + 1] : null;
         output(await CalDAV.createTask(title, calendar, dueDate, priority, description));
@@ -19284,7 +19298,9 @@ async function main() {
         const dueIndex = args.indexOf("--due");
         if (dueIndex !== -1) updates.dueDate = args[dueIndex + 1];
         const prioIndex = args.indexOf("--priority");
-        if (prioIndex !== -1) updates.priority = args[prioIndex + 1];
+        if (prioIndex !== -1) {
+          updates.priority = parsePriorityInput(args[prioIndex + 1]);
+        }
         const descIndex = args.indexOf("--description");
         if (descIndex !== -1) updates.description = args[descIndex + 1];
         output(await CalDAV.updateTask(uid, calendar, updates));
