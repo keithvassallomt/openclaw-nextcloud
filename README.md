@@ -44,6 +44,45 @@ cd openclaw-nextcloud
 
 The skill is pre-bundled with all dependencies in `scripts/nextcloud.js` - no npm install required.
 
+## Upgrading to 0.4.0
+
+**0.4.0 contains a breaking change.** Eleven irreversible operations now refuse
+to run unless the command includes a matching `--confirm <command>:<subcommand>`
+token:
+
+- `notes delete` → `--confirm notes:delete`
+- `files delete` → `--confirm files:delete`
+- `tasks delete` → `--confirm tasks:delete`
+- `calendar delete` → `--confirm calendar:delete`
+- `contacts delete` → `--confirm contacts:delete`
+- `boards delete` → `--confirm boards:delete`
+- `stacks delete` → `--confirm stacks:delete`
+- `cards delete` → `--confirm cards:delete`
+- `labels delete` → `--confirm labels:delete`
+- `shares delete` → `--confirm shares:delete`
+- `shares create-link` → `--confirm shares:create-link`
+
+```bash
+# 0.3.0
+node scripts/nextcloud.js notes delete --id 123
+
+# 0.4.0
+node scripts/nextcloud.js notes delete --id 123 --confirm notes:delete
+```
+
+Everything else is unchanged — all reads, all creates, and every `edit`, plus
+`files upload`, `cards move` and `cards comment-delete`, work exactly as before.
+
+Agents pick this up automatically, since `SKILL.md` ships alongside the bundle
+and is read on invocation. **Shell scripts and cron jobs that call the eleven
+commands above will break until the token is added**, as they never re-read
+`SKILL.md`.
+
+Also in 0.4.0: text and secrets can be supplied from a file instead of the
+command line (`--content-file`, `--description-file`, `--note-file`,
+`--message-file`, `--password-file`), keeping them out of the process argument
+list where `ps` can read them. Prefer `--password-file` for share passwords.
+
 ## Development
 
 The project uses a bundled architecture:
@@ -423,7 +462,9 @@ Thanks to:
 
 - [@schemann](https://github.com/schemann) — `fileId` / `internalLink` on file listings, auto-MKCOL on upload, public-link shares (`shares list` / `create-link` / `delete`).
 - [@KssimiClaw](https://github.com/KssimiClaw) — fix for `files search` 501 by routing the WebDAV `SEARCH` request to the DAV root.
-- [@makefu](https://github.com/makefu) - Kanban Boards support.
+- [@makefu](https://github.com/makefu) — Kanban Boards support.
+- [@bolinches](https://github.com/bolinches) — fix for secondary calendars advertising multiple component types being dropped from event/task operations, and vCard 3.0 group prefix handling (`item1.EMAIL`, `item2.TEL`) in the contact parser.
+- [@sam2kb](https://github.com/sam2kb) — security review and the fixes behind 0.4.0: WebDAV path traversal, iCalendar/vCard value escaping and unescaping, `PRIORITY` injection, confirmation tokens for irreversible operations, file-backed text and secret inputs, `skillKey` config stability, and the project's first test suites.
 
 ## License
 

@@ -1,6 +1,6 @@
 {
   "name": "openclaw-nextcloud",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Manage Notes, Tasks, Calendar, Files, Contacts, and Deck Kanban boards in your Nextcloud instance via CalDAV, WebDAV, Notes, and Deck APIs.",
   "bin": {
     "nextcloud": "./scripts/nextcloud.js"
