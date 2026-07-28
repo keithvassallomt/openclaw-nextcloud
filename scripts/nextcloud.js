@@ -17722,6 +17722,23 @@ function unescapePropertyValue(value) {
     (_, char) => char === "n" || char === "N" ? "\n" : char
   );
 }
+function splitStructuredValue(value) {
+  const parts = [];
+  let current = "";
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (char === "\\" && i + 1 < value.length) {
+      current += char + value[++i];
+    } else if (char === ";") {
+      parts.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  parts.push(current);
+  return parts;
+}
 function parsePriorityInput(value) {
   if (!/^[0-9]$/.test(String(value))) {
     throw new Error("Priority must be an integer from 0 to 9.");
@@ -18613,14 +18630,20 @@ var Contacts = {
   },
   _parseVCard(vcard) {
     const cleanValue = (val) => val ? unescapePropertyValue(val.replace(/&#13;/g, "").replace(/\r/g, "").trim()) : null;
-    const getField = (field) => {
+    const matchField = (field) => {
       const regex = new RegExp(`^(?:[A-Za-z0-9-]+\\.)?${field}(?:;[^:\\r\\n]*)?:(.*)$`, "mi");
       const match = vcard.match(regex);
-      return match ? cleanValue(match[1]) : null;
+      return match ? match[1].replace(/&#13;/g, "").replace(/\r/g, "").trim() : null;
+    };
+    const getField = (field) => {
+      const raw = matchField(field);
+      return raw === null ? null : unescapePropertyValue(raw);
     };
     const uid = getField("UID");
     const fn = getField("FN");
-    const n = getField("N");
+    const rawName = matchField("N");
+    const nameParts = rawName === null ? null : splitStructuredValue(rawName).map((part) => unescapePropertyValue(part));
+    const n = nameParts === null ? null : nameParts.join(";");
     const phones = [];
     const phoneRegex = /^(?:[A-Za-z0-9-]+\.)?TEL(?:;[^:\r\n]*)?:(.*)$/gmi;
     let phoneMatch;
@@ -18640,6 +18663,16 @@ var Contacts = {
       uid,
       fullName: fn,
       name: n,
+      // Individually unescaped components, so callers that need a single
+      // part (e.g. a first name) don't have to re-split `name` and guess
+      // whether a ";" was a separator or part of the text.
+      nameComponents: nameParts === null ? null : {
+        last: nameParts[0] ?? null,
+        first: nameParts[1] ?? null,
+        middle: nameParts[2] ?? null,
+        prefix: nameParts[3] ?? null,
+        suffix: nameParts[4] ?? null
+      },
       phones: phones.length > 0 ? phones : null,
       emails: emails.length > 0 ? emails : null,
       organization: org,

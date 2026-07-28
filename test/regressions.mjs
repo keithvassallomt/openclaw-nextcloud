@@ -42,6 +42,7 @@ const groupedContactReport = `<?xml version="1.0" encoding="utf-8"?>
 VERSION:3.0
 UID:grouped
 FN:Grouped\\, Contact
+N:Smith\\;Jones;John;;;
 item1.EMAIL;TYPE=work:grouped@example.com
 item2.TEL:+15551234567
 END:VCARD</card:address-data>
@@ -273,6 +274,19 @@ record(
     groupedContact?.emails?.[0] === 'grouped@example.com' &&
     groupedContact?.phones?.[0] === '+15551234567',
   { groupedContact, result }
+);
+
+record(
+  'structured N components are split before unescaping',
+  result.code === 0 &&
+    // "Smith\;Jones" is one component containing a literal semicolon, not two
+    groupedContact?.nameComponents?.last === 'Smith;Jones' &&
+    groupedContact?.nameComponents?.first === 'John' &&
+    groupedContact?.nameComponents?.middle === '' &&
+    // A naive split of `name` cannot recover this, which is why the
+    // components are exposed separately.
+    groupedContact?.name === 'Smith;Jones;John;;;',
+  { nameComponents: groupedContact?.nameComponents ?? null, result }
 );
 
 before = requests.length;
