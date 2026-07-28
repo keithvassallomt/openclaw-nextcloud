@@ -153,7 +153,11 @@ for (const filePath of [
   'folder/%2e%2e'
 ]) {
   const requestCount = requests.length;
-  const pathResult = await run(['files', 'delete', '--path', filePath]);
+  const pathResult = await run([
+    'files', 'delete',
+    '--path', filePath,
+    '--confirm', 'files:delete'
+  ]);
   record(
     `file path ${JSON.stringify(filePath)} is rejected before a DAV request`,
     pathResult.code !== 0 &&
@@ -164,7 +168,11 @@ for (const filePath of [
 }
 
 let before = requests.length;
-let result = await run(['files', 'delete', '--path', 'reports../file.txt']);
+let result = await run([
+  'files', 'delete',
+  '--path', 'reports../file.txt',
+  '--confirm', 'files:delete'
+]);
 record(
   'non-segment double dots remain valid in file names',
   result.code === 0 &&
@@ -176,7 +184,11 @@ record(
 );
 
 before = requests.length;
-result = await run(['files', 'delete', '--path', 'reports/100% done.txt']);
+result = await run([
+  'files', 'delete',
+  '--path', 'reports/100% done.txt',
+  '--confirm', 'files:delete'
+]);
 record(
   'literal percent signs are preserved and encoded in DAV paths',
   result.code === 0 &&

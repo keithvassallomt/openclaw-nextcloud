@@ -75,6 +75,15 @@ NEXTCLOUD_TOKEN=your_app_password
 node scripts/nextcloud.js <command> <subcommand> [options]
 ```
 
+Irreversible deletes and public-share operations require an action-specific
+confirmation token such as `--confirm notes:delete`. Add that token only after
+confirming the exact operation and target with the user.
+
+Sensitive or multiline values can be read from files so they do not appear in
+the process argument list. Use `--content-file`, `--description-file`,
+`--note-file`, `--message-file`, or `--password-file` in place of the matching
+inline flag. Each inline/file pair is mutually exclusive.
+
 ### Notes
 
 ```bash
@@ -87,11 +96,16 @@ node scripts/nextcloud.js notes create --title "My Note" --content "Note content
 # Get a specific note
 node scripts/nextcloud.js notes get --id 123
 
-# Update a note
-node scripts/nextcloud.js notes edit --id 123 --title "Updated Title" --content "New content"
+# Update a note with inline content
+node scripts/nextcloud.js notes edit --id 123 --title "Updated Title" \
+  --content "Updated note content"
+
+# Or read the content from a file
+node scripts/nextcloud.js notes edit --id 123 \
+  --content-file "/secure/input/note.txt"
 
 # Delete a note
-node scripts/nextcloud.js notes delete --id 123
+node scripts/nextcloud.js notes delete --id 123 --confirm notes:delete
 ```
 
 ### Files
@@ -100,8 +114,13 @@ node scripts/nextcloud.js notes delete --id 123
 # List files in a directory
 node scripts/nextcloud.js files list --path "Documents/"
 
-# Upload a file (parent directories are created automatically if missing)
-node scripts/nextcloud.js files upload --path "Documents/Reports/test.txt" --content "Hello World"
+# Upload inline content (parent directories are created automatically if missing)
+node scripts/nextcloud.js files upload --path "Documents/Reports/test.txt" \
+  --content "Report contents"
+
+# Or read the content from a file
+node scripts/nextcloud.js files upload --path "Documents/Reports/test.txt" \
+  --content-file "/secure/input/test.txt"
 
 # Download a file
 node scripts/nextcloud.js files get --path "Documents/test.txt"
@@ -110,7 +129,8 @@ node scripts/nextcloud.js files get --path "Documents/test.txt"
 node scripts/nextcloud.js files search --query "report"
 
 # Delete a file
-node scripts/nextcloud.js files delete --path "Documents/test.txt"
+node scripts/nextcloud.js files delete --path "Documents/test.txt" \
+  --confirm files:delete
 ```
 
 `files list` and `files search` results include a `fileId` (when the server returns one) and a synthesized `internalLink` like `<NEXTCLOUD_URL>/index.php/f/<fileId>` that opens the file directly in the Nextcloud web UI.
@@ -121,8 +141,14 @@ node scripts/nextcloud.js files delete --path "Documents/test.txt"
 # Create a public link share for a file or folder
 node scripts/nextcloud.js shares create-link --path "/Documents/Reports" \
   --permissions read \
-  --password "Secret123" \
-  --expire "2026-04-15"
+  --password "share-password" \
+  --expire "2026-04-15" \
+  --confirm shares:create-link
+
+# Or keep the password out of the process argument list
+node scripts/nextcloud.js shares create-link --path "/Documents/Reports" \
+  --password-file "/secure/input/share-password" \
+  --confirm shares:create-link
 
 # List all shares
 node scripts/nextcloud.js shares list
@@ -131,10 +157,10 @@ node scripts/nextcloud.js shares list
 node scripts/nextcloud.js shares list --path "/Documents/Reports"
 
 # Delete a share by ID
-node scripts/nextcloud.js shares delete --id 29
+node scripts/nextcloud.js shares delete --id 29 --confirm shares:delete
 ```
 
-`--permissions read` (default) is read-only; `--permissions edit` grants create/read/update/delete on the shared resource. `--password` and `--expire` are optional.
+`--permissions read` (default) is read-only; `--permissions edit` grants create/read/update/delete on the shared resource. `--password`, `--password-file`, and `--expire` are optional. Prefer `--password-file`; a single final newline is removed before the password is sent.
 
 ### Calendar
 
@@ -149,10 +175,13 @@ node scripts/nextcloud.js calendar list --from "2026-02-01T00:00:00Z" --to "2026
 node scripts/nextcloud.js calendar create --summary "Team Meeting" --start "2026-02-05T10:00:00Z" --end "2026-02-05T11:00:00Z" --location "Conference Room B"
 
 # Update an event
-node scripts/nextcloud.js calendar edit --uid event-uid --summary "Updated Meeting" --location "Zoom"
+node scripts/nextcloud.js calendar edit --uid event-uid \
+  --summary "Updated Meeting" \
+  --location "Zoom"
 
 # Delete an event
-node scripts/nextcloud.js calendar delete --uid event-uid
+node scripts/nextcloud.js calendar delete --uid event-uid \
+  --confirm calendar:delete
 ```
 
 `--calendar` and `--addressbook` accept the display name (case-insensitive),
@@ -174,7 +203,7 @@ node scripts/nextcloud.js tasks create --title "Buy groceries" --due "2026-02-05
 node scripts/nextcloud.js tasks complete --uid task-uid
 
 # Delete a task
-node scripts/nextcloud.js tasks delete --uid task-uid
+node scripts/nextcloud.js tasks delete --uid task-uid --confirm tasks:delete
 ```
 
 ### Contacts
@@ -196,10 +225,12 @@ node scripts/nextcloud.js contacts create --name "John Doe" --email "john@exampl
 node scripts/nextcloud.js contacts get --uid contact-uid
 
 # Update a contact
-node scripts/nextcloud.js contacts edit --uid contact-uid --email "newemail@example.com"
+node scripts/nextcloud.js contacts edit --uid contact-uid \
+  --email "newemail@example.com"
 
 # Delete a contact
-node scripts/nextcloud.js contacts delete --uid contact-uid
+node scripts/nextcloud.js contacts delete --uid contact-uid \
+  --confirm contacts:delete
 ```
 
 ### Deck (Kanban)
@@ -227,10 +258,13 @@ node scripts/nextcloud.js cards create --board 6 --stack 15 --title "Buy LED rin
 node scripts/nextcloud.js cards list --board 6 --stack 15
 
 # Edit a card (rename, set due date, mark done)
-node scripts/nextcloud.js cards edit --board 6 --stack 15 --card 73 --title "Buy LED ring (8cm)" --done true
+node scripts/nextcloud.js cards edit --board 6 --stack 15 --card 73 \
+  --title "Buy LED ring (8cm)" \
+  --done true
 
 # Move a card to another stack
-node scripts/nextcloud.js cards move --board 6 --stack 15 --card 73 --to-stack 17
+node scripts/nextcloud.js cards move --board 6 --stack 15 --card 73 \
+  --to-stack 17
 
 # Labels: create on a board, then assign/remove on a card
 node scripts/nextcloud.js labels create --board 6 --title "Urgent" --color FF0000
@@ -242,7 +276,8 @@ node scripts/nextcloud.js cards comment-add --card 73 --message "Ordered today"
 node scripts/nextcloud.js cards comment-list --card 73
 
 # Delete a card
-node scripts/nextcloud.js cards delete --board 6 --stack 17 --card 73
+node scripts/nextcloud.js cards delete --board 6 --stack 17 --card 73 \
+  --confirm cards:delete
 ```
 
 Deleting a board (`boards delete --board <id>`) is a soft-delete on the Nextcloud side; the board stops appearing in `boards list` and is purged by the server.
