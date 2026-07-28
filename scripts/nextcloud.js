@@ -17682,6 +17682,52 @@ function errorOutput(message) {
   }, null, 2));
   process.exit(1);
 }
+function sanitizePath(filePath) {
+  if (typeof filePath !== "string" || filePath === "") {
+    throw new Error("File path must be a non-empty string.");
+  }
+  const normalizedPercentEncoding = filePath.replace(/%(?![0-9A-Fa-f]{2})/g, "%25");
+  let decoded;
+  try {
+    decoded = decodeURIComponent(normalizedPercentEncoding);
+  } catch {
+    decoded = filePath;
+  }
+  const decodedSegments = decoded.split("/");
+  if (decodedSegments.some((segment) => segment === "." || segment === "..")) {
+    throw new Error("File path contains disallowed dot-segments (. or ..).");
+  }
+  if (/[\x00-\x1f\x7f]/.test(decoded)) {
+    throw new Error("File path contains control characters.");
+  }
+  if (/\\/.test(decoded)) {
+    throw new Error("File path contains backslashes.");
+  }
+  return decoded;
+}
+function encodePathSegments(decodedPath) {
+  return decodedPath.split("/").map((seg) => encodeURIComponent(seg)).join("/");
+}
+function escapePropertyValue(value) {
+  if (typeof value !== "string") return String(value);
+  let escaped = value.replace(/\\/g, "\\\\");
+  escaped = escaped.replace(/\r\n/g, "\\n").replace(/\n/g, "\\n").replace(/\r/g, "\\n");
+  escaped = escaped.replace(/;/g, "\\;").replace(/,/g, "\\,");
+  return escaped;
+}
+function unescapePropertyValue(value) {
+  if (value === null || value === void 0) return value;
+  return String(value).replace(
+    /\\([\\;,nN])/g,
+    (_, char) => char === "n" || char === "N" ? "\n" : char
+  );
+}
+function parsePriorityInput(value) {
+  if (!/^[0-9]$/.test(String(value))) {
+    throw new Error("Priority must be an integer from 0 to 9.");
+  }
+  return String(value);
+}
 function ensureArray(item) {
   if (Array.isArray(item)) return item;
   if (item === void 0 || item === null) return [];
@@ -17794,8 +17840,10 @@ var Notes = {
 };
 var Files = {
   async list(dirPath = "/") {
-    const cleanPath = dirPath.startsWith("/") ? dirPath.slice(1) : dirPath;
-    const endpoint = `/remote.php/dav/files/${CONFIG.user}/${cleanPath}`;
+    const decodedPath = sanitizePath(dirPath);
+    const relPath = decodedPath.replace(/^\/+/, "");
+    const safePath = relPath ? encodePathSegments(relPath) : "";
+    const endpoint = `/remote.php/dav/files/${encodeURIComponent(CONFIG.user)}/${safePath}`;
     const propfindBody = `<?xml version="1.0" encoding="utf-8"?>
 <d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
   <d:prop>
@@ -17825,8 +17873,8 @@ var Files = {
       const props = propstats[0]["d:prop"];
       const isDir = props["d:resourcetype"] && props["d:resourcetype"]["d:collection"] !== void 0;
       const name = decodeURIComponent(href.split("/").filter((p) => p).pop());
-      if (href.endsWith(encodeURIComponent(CONFIG.user) + "/" + cleanPath) || href.endsWith(encodeURIComponent(CONFIG.user) + "/" + cleanPath + "/")) {
-        if (cleanPath !== "" && name === cleanPath.split("/").pop()) return null;
+      if (href.endsWith(encodeURIComponent(CONFIG.user) + "/" + safePath) || href.endsWith(encodeURIComponent(CONFIG.user) + "/" + safePath + "/")) {
+        if (relPath !== "" && name === relPath.split("/").pop()) return null;
       }
       const fileId = props["oc:fileid"] != null ? String(props["oc:fileid"]) : null;
       return {
@@ -17841,20 +17889,23 @@ var Files = {
     }).filter((f) => f);
   },
   async upload(filePath, content) {
-    const cleanPath = filePath.startsWith("/") ? filePath.slice(1) : filePath;
-    const segments = cleanPath.split("/").filter(Boolean);
+    const decodedPath = sanitizePath(filePath);
+    const relPath = decodedPath.replace(/^\/+/, "");
+    if (!relPath) throw new Error("File path must be non-empty.");
+    const safePath = encodePathSegments(relPath);
+    const segments = relPath.split("/").filter(Boolean);
     if (segments.length > 1) {
       let currentPath = "";
       for (const seg of segments.slice(0, -1)) {
-        currentPath = currentPath ? `${currentPath}/${seg}` : seg;
+        currentPath = currentPath ? `${currentPath}/${encodeURIComponent(seg)}` : encodeURIComponent(seg);
         try {
-          await request(`/remote.php/dav/files/${CONFIG.user}/${currentPath}`, { method: "MKCOL" });
+          await request(`/remote.php/dav/files/${encodeURIComponent(CONFIG.user)}/${currentPath}`, { method: "MKCOL" });
         } catch (e) {
           if (e.status !== 405) throw e;
         }
       }
     }
-    const endpoint = `/remote.php/dav/files/${CONFIG.user}/${cleanPath}`;
+    const endpoint = `/remote.php/dav/files/${encodeURIComponent(CONFIG.user)}/${safePath}`;
     await request(endpoint, {
       method: "PUT",
       headers: {
@@ -17866,8 +17917,11 @@ var Files = {
     return { path: filePath, status: "uploaded", size: content.length };
   },
   async get(filePath) {
-    const cleanPath = filePath.startsWith("/") ? filePath.slice(1) : filePath;
-    const endpoint = `/remote.php/dav/files/${CONFIG.user}/${cleanPath}`;
+    const decodedPath = sanitizePath(filePath);
+    const relPath = decodedPath.replace(/^\/+/, "");
+    if (!relPath) throw new Error("File path must be non-empty.");
+    const safePath = encodePathSegments(relPath);
+    const endpoint = `/remote.php/dav/files/${encodeURIComponent(CONFIG.user)}/${safePath}`;
     const response = await fetch(`${CONFIG.url}${endpoint}`, {
       method: "GET",
       headers: {
@@ -17881,8 +17935,11 @@ var Files = {
     return { path: filePath, content, size: content.length };
   },
   async delete(filePath) {
-    const cleanPath = filePath.startsWith("/") ? filePath.slice(1) : filePath;
-    const endpoint = `/remote.php/dav/files/${CONFIG.user}/${cleanPath}`;
+    const decodedPath = sanitizePath(filePath);
+    const relPath = decodedPath.replace(/^\/+/, "");
+    if (!relPath) throw new Error("File path must be non-empty.");
+    const safePath = encodePathSegments(relPath);
+    const endpoint = `/remote.php/dav/files/${encodeURIComponent(CONFIG.user)}/${safePath}`;
     await request(endpoint, {
       method: "DELETE"
     });
@@ -18021,11 +18078,11 @@ var CalDAV = {
           allEvents.push({
             uid: uidMatch ? uidMatch[1].trim() : "No UID",
             calendar: cal.displayname,
-            summary: summaryMatch ? summaryMatch[1].trim() : "No Title",
-            description: descriptionMatch ? descriptionMatch[1].trim() : null,
+            summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : "No Title",
+            description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
             start: dtstartMatch ? dtstartMatch[1].trim() : "Unknown",
             end: dtendMatch ? dtendMatch[1].trim() : null,
-            location: locationMatch ? locationMatch[1].trim() : null
+            location: locationMatch ? unescapePropertyValue(locationMatch[1].trim()) : null
           });
         }
       } catch (e) {
@@ -18087,8 +18144,8 @@ var CalDAV = {
           allTodos.push({
             uid: uidMatch ? uidMatch[1].trim() : "No UID",
             calendar: cal.displayname,
-            summary: summaryMatch ? summaryMatch[1].trim() : "No Title",
-            description: descriptionMatch ? descriptionMatch[1].trim() : null,
+            summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : "No Title",
+            description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
             status: statusMatch ? statusMatch[1].trim() : "NEEDS-ACTION",
             due: dueMatch ? dueMatch[1].trim() : null,
             priority: priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : null
@@ -18175,13 +18232,13 @@ var CalDAV = {
     const regex = new RegExp(`^${prop}(?:;[^:\\r\\n]*)?:.*$`, "m");
     const newLine = `${prop}:${value}`;
     if (regex.test(vcal)) {
-      return vcal.replace(regex, newLine);
+      return vcal.replace(regex, () => newLine);
     }
     const endMatch = vcal.match(/END:(VTODO|VEVENT)/);
     if (!endMatch) {
       throw new Error("Cannot insert property: no END:VTODO or END:VEVENT found in calendar data.");
     }
-    return vcal.replace(endMatch[0], `${newLine}
+    return vcal.replace(endMatch[0], () => `${newLine}
 ${endMatch[0]}`);
   },
   async createTask(title, calendarName, dueDate, priority, description) {
@@ -18195,7 +18252,7 @@ PRODID:-//OpenClaw//Nextcloud Skill//EN
 BEGIN:VTODO
 UID:${uid}
 DTSTAMP:${dtstamp}
-SUMMARY:${title}
+SUMMARY:${escapePropertyValue(title)}
 STATUS:NEEDS-ACTION
 `;
     if (dueDate) {
@@ -18205,7 +18262,7 @@ STATUS:NEEDS-ACTION
     }
     if (priority) vtodo += `PRIORITY:${priority}
 `;
-    if (description) vtodo += `DESCRIPTION:${description}
+    if (description) vtodo += `DESCRIPTION:${escapePropertyValue(description)}
 `;
     vtodo += `END:VTODO
 END:VCALENDAR`;
@@ -18226,9 +18283,9 @@ END:VCALENDAR`;
     const task = await this.findTaskPath(uid, calendarName);
     if (!task) throw new Error(`Task ${uid} not found.`);
     let vtodo = task.data;
-    if (updates.title) vtodo = this._updateProperty(vtodo, "SUMMARY", updates.title);
+    if (updates.title) vtodo = this._updateProperty(vtodo, "SUMMARY", escapePropertyValue(updates.title));
     if (updates.priority) vtodo = this._updateProperty(vtodo, "PRIORITY", updates.priority);
-    if (updates.description) vtodo = this._updateProperty(vtodo, "DESCRIPTION", updates.description);
+    if (updates.description) vtodo = this._updateProperty(vtodo, "DESCRIPTION", escapePropertyValue(updates.description));
     if (updates.dueDate) {
       const due = parseDateInput(updates.dueDate);
       vtodo = this._updateProperty(vtodo, "DUE", (0, import_date_fns.format)(due, "yyyyMMdd'T'HHmmss'Z'"));
@@ -18286,13 +18343,13 @@ PRODID:-//OpenClaw//Nextcloud Skill//EN
 BEGIN:VEVENT
 UID:${uid}
 DTSTAMP:${dtstamp}
-SUMMARY:${summary}
+SUMMARY:${escapePropertyValue(summary)}
 DTSTART:${toCalDavDate(start)}
 DTEND:${toCalDavDate(end)}
 `;
-    if (description) vevent += `DESCRIPTION:${description}
+    if (description) vevent += `DESCRIPTION:${escapePropertyValue(description)}
 `;
-    if (location) vevent += `LOCATION:${location}
+    if (location) vevent += `LOCATION:${escapePropertyValue(location)}
 `;
     vevent += `END:VEVENT
 END:VCALENDAR`;
@@ -18364,7 +18421,7 @@ END:VCALENDAR`;
     const event = await this.findEventPath(uid, calendarName);
     if (!event) throw new Error(`Event ${uid} not found.`);
     let vevent = event.data;
-    if (updates.summary) vevent = this._updateProperty(vevent, "SUMMARY", updates.summary);
+    if (updates.summary) vevent = this._updateProperty(vevent, "SUMMARY", escapePropertyValue(updates.summary));
     if (updates.start) {
       const d = parseDateInput(updates.start);
       vevent = this._updateProperty(vevent, "DTSTART", d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z");
@@ -18374,10 +18431,10 @@ END:VCALENDAR`;
       vevent = this._updateProperty(vevent, "DTEND", d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z");
     }
     if (updates.description !== void 0) {
-      vevent = this._updateProperty(vevent, "DESCRIPTION", updates.description);
+      vevent = this._updateProperty(vevent, "DESCRIPTION", escapePropertyValue(updates.description));
     }
     if (updates.location !== void 0) {
-      vevent = this._updateProperty(vevent, "LOCATION", updates.location);
+      vevent = this._updateProperty(vevent, "LOCATION", escapePropertyValue(updates.location));
     }
     await request(event.href, {
       method: "PUT",
@@ -18555,9 +18612,9 @@ var Contacts = {
     return allContacts;
   },
   _parseVCard(vcard) {
-    const cleanValue = (val) => val ? val.replace(/&#13;/g, "").replace(/\r/g, "").trim() : null;
+    const cleanValue = (val) => val ? unescapePropertyValue(val.replace(/&#13;/g, "").replace(/\r/g, "").trim()) : null;
     const getField = (field) => {
-      const regex = new RegExp(`^(?:[^.]+\\.)?${field}(?:;[^:]*)?:(.*)$`, "mi");
+      const regex = new RegExp(`^(?:[A-Za-z0-9-]+\\.)?${field}(?:;[^:\\r\\n]*)?:(.*)$`, "mi");
       const match = vcard.match(regex);
       return match ? cleanValue(match[1]) : null;
     };
@@ -18565,13 +18622,13 @@ var Contacts = {
     const fn = getField("FN");
     const n = getField("N");
     const phones = [];
-    const phoneRegex = /^(?:[^.]+\.)?TEL(?:;[^:]*)?:(.*)$/gmi;
+    const phoneRegex = /^(?:[A-Za-z0-9-]+\.)?TEL(?:;[^:\r\n]*)?:(.*)$/gmi;
     let phoneMatch;
     while ((phoneMatch = phoneRegex.exec(vcard)) !== null) {
       phones.push(cleanValue(phoneMatch[1]));
     }
     const emails = [];
-    const emailRegex = /^(?:[^.]+\.)?EMAIL(?:;[^:]*)?:(.*)$/gmi;
+    const emailRegex = /^(?:[A-Za-z0-9-]+\.)?EMAIL(?:;[^:\r\n]*)?:(.*)$/gmi;
     let emailMatch;
     while ((emailMatch = emailRegex.exec(vcard)) !== null) {
       emails.push(cleanValue(emailMatch[1]));
@@ -18647,30 +18704,31 @@ var Contacts = {
   async create(fullName, addressBookName, options = {}) {
     const ab = await this.getAddressBook(addressBookName);
     const uid = crypto.randomUUID();
+    const escapedFn = escapePropertyValue(fullName);
     let vcard = `BEGIN:VCARD
 VERSION:3.0
 UID:${uid}
-FN:${fullName}
+FN:${escapedFn}
 `;
     const nameParts = fullName.split(" ");
     if (nameParts.length >= 2) {
-      const lastName = nameParts[nameParts.length - 1];
-      const firstName = nameParts.slice(0, -1).join(" ");
+      const lastName = escapePropertyValue(nameParts[nameParts.length - 1]);
+      const firstName = escapePropertyValue(nameParts.slice(0, -1).join(" "));
       vcard += `N:${lastName};${firstName};;;
 `;
     } else {
-      vcard += `N:${fullName};;;;
+      vcard += `N:${escapedFn};;;;
 `;
     }
-    if (options.email) vcard += `EMAIL:${options.email}
+    if (options.email) vcard += `EMAIL:${escapePropertyValue(options.email)}
 `;
-    if (options.phone) vcard += `TEL:${options.phone}
+    if (options.phone) vcard += `TEL:${escapePropertyValue(options.phone)}
 `;
-    if (options.organization) vcard += `ORG:${options.organization}
+    if (options.organization) vcard += `ORG:${escapePropertyValue(options.organization)}
 `;
-    if (options.title) vcard += `TITLE:${options.title}
+    if (options.title) vcard += `TITLE:${escapePropertyValue(options.title)}
 `;
-    if (options.note) vcard += `NOTE:${options.note}
+    if (options.note) vcard += `NOTE:${escapePropertyValue(options.note)}
 `;
     vcard += `END:VCARD`;
     const filename = `${uid}.vcf`;
@@ -18687,12 +18745,12 @@ FN:${fullName}
     return { uid, status: "created", addressBook: ab.displayname };
   },
   _updateVCardField(vcard, field, value) {
-    const regex = new RegExp(`^((?:[^.]+\\.)?${field}(?:;[^:]*)?:).*$`, "mi");
+    const regex = new RegExp(`^((?:[A-Za-z0-9-]+\\.)?${field}(?:;[^:\\r\\n]*)?:).*$`, "mi");
     const newLine = `${field}:${value}`;
     if (regex.test(vcard)) {
       return vcard.replace(regex, (match, prefix) => `${prefix}${value}`);
     } else {
-      return vcard.replace("END:VCARD", `${newLine}
+      return vcard.replace("END:VCARD", () => `${newLine}
 END:VCARD`);
     }
   },
@@ -18701,19 +18759,19 @@ END:VCARD`);
     if (!contact) throw new Error(`Contact ${uid} not found.`);
     let vcard = contact.data;
     if (updates.fullName) {
-      vcard = this._updateVCardField(vcard, "FN", updates.fullName);
+      vcard = this._updateVCardField(vcard, "FN", escapePropertyValue(updates.fullName));
       const nameParts = updates.fullName.split(" ");
       if (nameParts.length >= 2) {
-        const lastName = nameParts[nameParts.length - 1];
-        const firstName = nameParts.slice(0, -1).join(" ");
+        const lastName = escapePropertyValue(nameParts[nameParts.length - 1]);
+        const firstName = escapePropertyValue(nameParts.slice(0, -1).join(" "));
         vcard = this._updateVCardField(vcard, "N", `${lastName};${firstName};;;`);
       }
     }
-    if (updates.email) vcard = this._updateVCardField(vcard, "EMAIL", updates.email);
-    if (updates.phone) vcard = this._updateVCardField(vcard, "TEL", updates.phone);
-    if (updates.organization) vcard = this._updateVCardField(vcard, "ORG", updates.organization);
-    if (updates.title) vcard = this._updateVCardField(vcard, "TITLE", updates.title);
-    if (updates.note) vcard = this._updateVCardField(vcard, "NOTE", updates.note);
+    if (updates.email) vcard = this._updateVCardField(vcard, "EMAIL", escapePropertyValue(updates.email));
+    if (updates.phone) vcard = this._updateVCardField(vcard, "TEL", escapePropertyValue(updates.phone));
+    if (updates.organization) vcard = this._updateVCardField(vcard, "ORG", escapePropertyValue(updates.organization));
+    if (updates.title) vcard = this._updateVCardField(vcard, "TITLE", escapePropertyValue(updates.title));
+    if (updates.note) vcard = this._updateVCardField(vcard, "NOTE", escapePropertyValue(updates.note));
     await request(contact.href, {
       method: "PUT",
       headers: {
@@ -19224,7 +19282,7 @@ async function main() {
         const dueIndex = args.indexOf("--due");
         const dueDate = dueIndex !== -1 ? args[dueIndex + 1] : null;
         const prioIndex = args.indexOf("--priority");
-        const priority = prioIndex !== -1 ? args[prioIndex + 1] : null;
+        const priority = prioIndex !== -1 ? parsePriorityInput(args[prioIndex + 1]) : null;
         const descIndex = args.indexOf("--description");
         const description = descIndex !== -1 ? args[descIndex + 1] : null;
         output(await CalDAV.createTask(title, calendar, dueDate, priority, description));
@@ -19240,7 +19298,9 @@ async function main() {
         const dueIndex = args.indexOf("--due");
         if (dueIndex !== -1) updates.dueDate = args[dueIndex + 1];
         const prioIndex = args.indexOf("--priority");
-        if (prioIndex !== -1) updates.priority = args[prioIndex + 1];
+        if (prioIndex !== -1) {
+          updates.priority = parsePriorityInput(args[prioIndex + 1]);
+        }
         const descIndex = args.indexOf("--description");
         if (descIndex !== -1) updates.description = args[descIndex + 1];
         output(await CalDAV.updateTask(uid, calendar, updates));

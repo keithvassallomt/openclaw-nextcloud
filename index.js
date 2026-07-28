@@ -118,6 +118,82 @@ function errorOutput(message) {
     process.exit(1);
 }
 
+// --- Security: path traversal prevention ---
+// Reject paths that attempt to escape the WebDAV files namespace via dot-segments,
+// percent-encoded traversal, backslashes, null bytes, or control characters.
+function sanitizePath(filePath) {
+    if (typeof filePath !== 'string' || filePath === '') {
+        throw new Error('File path must be a non-empty string.');
+    }
+    // Preserve literal percent signs while still decoding valid escapes once
+    // to catch encoded traversal (e.g. %2e%2e%2f). If otherwise valid-looking
+    // escapes are not valid UTF-8, treat the path as a literal filename.
+    const normalizedPercentEncoding = filePath.replace(/%(?![0-9A-Fa-f]{2})/g, '%25');
+    let decoded;
+    try {
+        decoded = decodeURIComponent(normalizedPercentEncoding);
+    } catch {
+        decoded = filePath;
+    }
+    // Reject complete dot-segments after decoding. Both "." and ".." are
+    // normalized by URL clients and can otherwise alias a different DAV target.
+    const decodedSegments = decoded.split('/');
+    if (decodedSegments.some(segment => segment === '.' || segment === '..')) {
+        throw new Error('File path contains disallowed dot-segments (. or ..).');
+    }
+    if (/[\x00-\x1f\x7f]/.test(decoded)) {
+        throw new Error('File path contains control characters.');
+    }
+    if (/\\/.test(decoded)) {
+        throw new Error('File path contains backslashes.');
+    }
+    return decoded;
+}
+
+// URL-encode each path segment individually so that / in segment names are
+// encoded as %2F and don't become path separators.
+function encodePathSegments(decodedPath) {
+    return decodedPath.split('/').map(seg => encodeURIComponent(seg)).join('/');
+}
+
+// --- Security: iCalendar / vCard property-value escaping ---
+// Prevent property injection and value corruption by escaping special
+// characters per RFC 5545 (iCalendar) and RFC 6350 (vCard).
+//   \  → \\    (escape backslash first)
+//   ;  → \;
+//   ,  → \,
+//   \n → \\n   (literal backslash-n to represent newline in the value)
+//   \r → \\n
+// Additionally strip raw CR/LF to prevent property-line injection.
+function escapePropertyValue(value) {
+    if (typeof value !== 'string') return String(value);
+    // Escape existing backslashes before introducing the backslash-n sequence
+    // used for newlines. This prevents both property injection and accidental
+    // double-escaping of the newline marker.
+    let escaped = value.replace(/\\/g, '\\\\');
+    escaped = escaped.replace(/\r\n/g, '\\n').replace(/\n/g, '\\n').replace(/\r/g, '\\n');
+    // Escape semicolons and commas which delimit structured values
+    escaped = escaped.replace(/;/g, '\\;').replace(/,/g, '\\,');
+    return escaped;
+}
+
+// Decode one layer of RFC 5545 / RFC 6350 text escaping when returning
+// calendar and contact values to callers. A single-pass replacement avoids
+// interpreting escape sequences that were themselves escaped in the source.
+function unescapePropertyValue(value) {
+    if (value === null || value === undefined) return value;
+    return String(value).replace(/\\([\\;,nN])/g, (_, char) =>
+        char === 'n' || char === 'N' ? '\n' : char
+    );
+}
+
+function parsePriorityInput(value) {
+    if (!/^[0-9]$/.test(String(value))) {
+        throw new Error('Priority must be an integer from 0 to 9.');
+    }
+    return String(value);
+}
+
 function ensureArray(item) {
     if (Array.isArray(item)) return item;
     if (item === undefined || item === null) return [];
@@ -251,8 +327,10 @@ const Notes = {
 // 2. Files (WebDAV)
 const Files = {
     async list(dirPath = '/') {
-        const cleanPath = dirPath.startsWith('/') ? dirPath.slice(1) : dirPath;
-        const endpoint = `/remote.php/dav/files/${CONFIG.user}/${cleanPath}`;
+        const decodedPath = sanitizePath(dirPath);
+        const relPath = decodedPath.replace(/^\/+/, '');
+        const safePath = relPath ? encodePathSegments(relPath) : '';
+        const endpoint = `/remote.php/dav/files/${encodeURIComponent(CONFIG.user)}/${safePath}`;
 
         // Explicitly request oc:fileid alongside the standard DAV props.
         // Without an explicit body, default PROPFIND props are returned and oc:fileid is omitted.
@@ -291,9 +369,9 @@ const Files = {
             const isDir = props['d:resourcetype'] && props['d:resourcetype']['d:collection'] !== undefined;
             const name = decodeURIComponent(href.split('/').filter(p => p).pop());
 
-            if (href.endsWith(encodeURIComponent(CONFIG.user) + '/' + cleanPath) ||
-                href.endsWith(encodeURIComponent(CONFIG.user) + '/' + cleanPath + '/')) {
-                 if (cleanPath !== '' && name === cleanPath.split('/').pop()) return null;
+            if (href.endsWith(encodeURIComponent(CONFIG.user) + '/' + safePath) ||
+                href.endsWith(encodeURIComponent(CONFIG.user) + '/' + safePath + '/')) {
+                 if (relPath !== '' && name === relPath.split('/').pop()) return null;
             }
 
             const fileId = props['oc:fileid'] != null ? String(props['oc:fileid']) : null;
@@ -311,23 +389,26 @@ const Files = {
     },
     
     async upload(filePath, content) {
-        const cleanPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
+        const decodedPath = sanitizePath(filePath);
+        const relPath = decodedPath.replace(/^\/+/, '');
+        if (!relPath) throw new Error('File path must be non-empty.');
+        const safePath = encodePathSegments(relPath);
 
         // Ensure parent directories exist. MKCOL each segment; 405 means it already exists.
-        const segments = cleanPath.split('/').filter(Boolean);
+        const segments = relPath.split('/').filter(Boolean);
         if (segments.length > 1) {
             let currentPath = '';
             for (const seg of segments.slice(0, -1)) {
-                currentPath = currentPath ? `${currentPath}/${seg}` : seg;
+                currentPath = currentPath ? `${currentPath}/${encodeURIComponent(seg)}` : encodeURIComponent(seg);
                 try {
-                    await request(`/remote.php/dav/files/${CONFIG.user}/${currentPath}`, { method: 'MKCOL' });
+                    await request(`/remote.php/dav/files/${encodeURIComponent(CONFIG.user)}/${currentPath}`, { method: 'MKCOL' });
                 } catch (e) {
                     if (e.status !== 405) throw e;
                 }
             }
         }
 
-        const endpoint = `/remote.php/dav/files/${CONFIG.user}/${cleanPath}`;
+        const endpoint = `/remote.php/dav/files/${encodeURIComponent(CONFIG.user)}/${safePath}`;
 
         await request(endpoint, {
             method: 'PUT',
@@ -342,8 +423,11 @@ const Files = {
     },
 
     async get(filePath) {
-        const cleanPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
-        const endpoint = `/remote.php/dav/files/${CONFIG.user}/${cleanPath}`;
+        const decodedPath = sanitizePath(filePath);
+        const relPath = decodedPath.replace(/^\/+/, '');
+        if (!relPath) throw new Error('File path must be non-empty.');
+        const safePath = encodePathSegments(relPath);
+        const endpoint = `/remote.php/dav/files/${encodeURIComponent(CONFIG.user)}/${safePath}`;
 
         const response = await fetch(`${CONFIG.url}${endpoint}`, {
             method: 'GET',
@@ -361,8 +445,11 @@ const Files = {
     },
 
     async delete(filePath) {
-        const cleanPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
-        const endpoint = `/remote.php/dav/files/${CONFIG.user}/${cleanPath}`;
+        const decodedPath = sanitizePath(filePath);
+        const relPath = decodedPath.replace(/^\/+/, '');
+        if (!relPath) throw new Error('File path must be non-empty.');
+        const safePath = encodePathSegments(relPath);
+        const endpoint = `/remote.php/dav/files/${encodeURIComponent(CONFIG.user)}/${safePath}`;
 
         await request(endpoint, {
             method: 'DELETE'
@@ -537,11 +624,11 @@ const CalDAV = {
                      allEvents.push({
                          uid: uidMatch ? uidMatch[1].trim() : 'No UID',
                          calendar: cal.displayname,
-                         summary: summaryMatch ? summaryMatch[1].trim() : 'No Title',
-                         description: descriptionMatch ? descriptionMatch[1].trim() : null,
+                         summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : 'No Title',
+                         description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
                          start: dtstartMatch ? dtstartMatch[1].trim() : 'Unknown',
                          end: dtendMatch ? dtendMatch[1].trim() : null,
-                         location: locationMatch ? locationMatch[1].trim() : null
+                         location: locationMatch ? unescapePropertyValue(locationMatch[1].trim()) : null
                      });
                  }
              } catch (e) {
@@ -613,8 +700,8 @@ const CalDAV = {
                      allTodos.push({
                          uid: uidMatch ? uidMatch[1].trim() : 'No UID',
                          calendar: cal.displayname,
-                         summary: summaryMatch ? summaryMatch[1].trim() : 'No Title',
-                         description: descriptionMatch ? descriptionMatch[1].trim() : null,
+                         summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : 'No Title',
+                         description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
                          status: statusMatch ? statusMatch[1].trim() : 'NEEDS-ACTION',
                          due: dueMatch ? dueMatch[1].trim() : null,
                          priority: priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : null
@@ -712,13 +799,13 @@ const CalDAV = {
         const regex = new RegExp(`^${prop}(?:;[^:\\r\\n]*)?:.*$`, 'm');
         const newLine = `${prop}:${value}`;
         if (regex.test(vcal)) {
-            return vcal.replace(regex, newLine);
+            return vcal.replace(regex, () => newLine);
         }
         const endMatch = vcal.match(/END:(VTODO|VEVENT)/);
         if (!endMatch) {
             throw new Error('Cannot insert property: no END:VTODO or END:VEVENT found in calendar data.');
         }
-        return vcal.replace(endMatch[0], `${newLine}\n${endMatch[0]}`);
+        return vcal.replace(endMatch[0], () => `${newLine}\n${endMatch[0]}`);
     },
 
     async createTask(title, calendarName, dueDate, priority, description) {
@@ -727,7 +814,7 @@ const CalDAV = {
         const now = new Date();
         const dtstamp = format(now, "yyyyMMdd'T'HHmmss'Z'");
 
-        let vtodo = `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OpenClaw//Nextcloud Skill//EN\nBEGIN:VTODO\nUID:${uid}\nDTSTAMP:${dtstamp}\nSUMMARY:${title}\nSTATUS:NEEDS-ACTION\n`;
+        let vtodo = `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OpenClaw//Nextcloud Skill//EN\nBEGIN:VTODO\nUID:${uid}\nDTSTAMP:${dtstamp}\nSUMMARY:${escapePropertyValue(title)}\nSTATUS:NEEDS-ACTION\n`;
 
         if (dueDate) {
              const due = parseDateInput(dueDate);
@@ -735,7 +822,7 @@ const CalDAV = {
         }
 
         if (priority) vtodo += `PRIORITY:${priority}\n`;
-        if (description) vtodo += `DESCRIPTION:${description}\n`;
+        if (description) vtodo += `DESCRIPTION:${escapePropertyValue(description)}\n`;
 
         vtodo += `END:VTODO\nEND:VCALENDAR`;
 
@@ -761,9 +848,9 @@ const CalDAV = {
         
         let vtodo = task.data;
         
-        if (updates.title) vtodo = this._updateProperty(vtodo, 'SUMMARY', updates.title);
+        if (updates.title) vtodo = this._updateProperty(vtodo, 'SUMMARY', escapePropertyValue(updates.title));
         if (updates.priority) vtodo = this._updateProperty(vtodo, 'PRIORITY', updates.priority);
-        if (updates.description) vtodo = this._updateProperty(vtodo, 'DESCRIPTION', updates.description);
+        if (updates.description) vtodo = this._updateProperty(vtodo, 'DESCRIPTION', escapePropertyValue(updates.description));
         if (updates.dueDate) {
              const due = parseDateInput(updates.dueDate);
              vtodo = this._updateProperty(vtodo, 'DUE', format(due, "yyyyMMdd'T'HHmmss'Z'"));
@@ -826,10 +913,10 @@ const CalDAV = {
             return d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
         };
 
-        let vevent = `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OpenClaw//Nextcloud Skill//EN\nBEGIN:VEVENT\nUID:${uid}\nDTSTAMP:${dtstamp}\nSUMMARY:${summary}\nDTSTART:${toCalDavDate(start)}\nDTEND:${toCalDavDate(end)}\n`;
+        let vevent = `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OpenClaw//Nextcloud Skill//EN\nBEGIN:VEVENT\nUID:${uid}\nDTSTAMP:${dtstamp}\nSUMMARY:${escapePropertyValue(summary)}\nDTSTART:${toCalDavDate(start)}\nDTEND:${toCalDavDate(end)}\n`;
 
-        if (description) vevent += `DESCRIPTION:${description}\n`;
-        if (location) vevent += `LOCATION:${location}\n`;
+        if (description) vevent += `DESCRIPTION:${escapePropertyValue(description)}\n`;
+        if (location) vevent += `LOCATION:${escapePropertyValue(location)}\n`;
 
         vevent += `END:VEVENT\nEND:VCALENDAR`;
 
@@ -911,7 +998,7 @@ const CalDAV = {
 
         let vevent = event.data;
 
-        if (updates.summary) vevent = this._updateProperty(vevent, 'SUMMARY', updates.summary);
+        if (updates.summary) vevent = this._updateProperty(vevent, 'SUMMARY', escapePropertyValue(updates.summary));
         if (updates.start) {
             const d = parseDateInput(updates.start);
             vevent = this._updateProperty(vevent, 'DTSTART', d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z');
@@ -921,10 +1008,10 @@ const CalDAV = {
             vevent = this._updateProperty(vevent, 'DTEND', d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z');
         }
         if (updates.description !== undefined) {
-            vevent = this._updateProperty(vevent, 'DESCRIPTION', updates.description);
+            vevent = this._updateProperty(vevent, 'DESCRIPTION', escapePropertyValue(updates.description));
         }
         if (updates.location !== undefined) {
-            vevent = this._updateProperty(vevent, 'LOCATION', updates.location);
+            vevent = this._updateProperty(vevent, 'LOCATION', escapePropertyValue(updates.location));
         }
 
         await request(event.href, {
@@ -1136,10 +1223,12 @@ const Contacts = {
 
     _parseVCard(vcard) {
         // Normalize line endings (vCard uses CRLF, and XML may encode CR as &#13;)
-        const cleanValue = (val) => val ? val.replace(/&#13;/g, '').replace(/\r/g, '').trim() : null;
+        const cleanValue = (val) => val
+            ? unescapePropertyValue(val.replace(/&#13;/g, '').replace(/\r/g, '').trim())
+            : null;
 
         const getField = (field) => {
-            const regex = new RegExp(`^(?:[^.]+\\.)?${field}(?:;[^:]*)?:(.*)$`, 'mi');
+            const regex = new RegExp(`^(?:[A-Za-z0-9-]+\\.)?${field}(?:;[^:\\r\\n]*)?:(.*)$`, 'mi');
             const match = vcard.match(regex);
             return match ? cleanValue(match[1]) : null;
         };
@@ -1150,7 +1239,7 @@ const Contacts = {
 
         // Parse phone numbers (can have multiple)
         const phones = [];
-        const phoneRegex = /^(?:[^.]+\.)?TEL(?:;[^:]*)?:(.*)$/gmi;
+        const phoneRegex = /^(?:[A-Za-z0-9-]+\.)?TEL(?:;[^:\r\n]*)?:(.*)$/gmi;
         let phoneMatch;
         while ((phoneMatch = phoneRegex.exec(vcard)) !== null) {
             phones.push(cleanValue(phoneMatch[1]));
@@ -1158,7 +1247,7 @@ const Contacts = {
 
         // Parse emails (can have multiple)
         const emails = [];
-        const emailRegex = /^(?:[^.]+\.)?EMAIL(?:;[^:]*)?:(.*)$/gmi;
+        const emailRegex = /^(?:[A-Za-z0-9-]+\.)?EMAIL(?:;[^:\r\n]*)?:(.*)$/gmi;
         let emailMatch;
         while ((emailMatch = emailRegex.exec(vcard)) !== null) {
             emails.push(cleanValue(emailMatch[1]));
@@ -1244,23 +1333,25 @@ const Contacts = {
         const ab = await this.getAddressBook(addressBookName);
         const uid = crypto.randomUUID();
 
-        let vcard = `BEGIN:VCARD\nVERSION:3.0\nUID:${uid}\nFN:${fullName}\n`;
+        const escapedFn = escapePropertyValue(fullName);
+        let vcard = `BEGIN:VCARD\nVERSION:3.0\nUID:${uid}\nFN:${escapedFn}\n`;
 
-        // Parse name into structured format if possible
+        // Parse name into structured format if possible.
+        // N components are semicolon-delimited; escape each component individually.
         const nameParts = fullName.split(' ');
         if (nameParts.length >= 2) {
-            const lastName = nameParts[nameParts.length - 1];
-            const firstName = nameParts.slice(0, -1).join(' ');
+            const lastName = escapePropertyValue(nameParts[nameParts.length - 1]);
+            const firstName = escapePropertyValue(nameParts.slice(0, -1).join(' '));
             vcard += `N:${lastName};${firstName};;;\n`;
         } else {
-            vcard += `N:${fullName};;;;\n`;
+            vcard += `N:${escapedFn};;;;\n`;
         }
 
-        if (options.email) vcard += `EMAIL:${options.email}\n`;
-        if (options.phone) vcard += `TEL:${options.phone}\n`;
-        if (options.organization) vcard += `ORG:${options.organization}\n`;
-        if (options.title) vcard += `TITLE:${options.title}\n`;
-        if (options.note) vcard += `NOTE:${options.note}\n`;
+        if (options.email) vcard += `EMAIL:${escapePropertyValue(options.email)}\n`;
+        if (options.phone) vcard += `TEL:${escapePropertyValue(options.phone)}\n`;
+        if (options.organization) vcard += `ORG:${escapePropertyValue(options.organization)}\n`;
+        if (options.title) vcard += `TITLE:${escapePropertyValue(options.title)}\n`;
+        if (options.note) vcard += `NOTE:${escapePropertyValue(options.note)}\n`;
 
         vcard += `END:VCARD`;
 
@@ -1281,12 +1372,12 @@ const Contacts = {
     },
 
     _updateVCardField(vcard, field, value) {
-        const regex = new RegExp(`^((?:[^.]+\\.)?${field}(?:;[^:]*)?:).*$`, 'mi');
+        const regex = new RegExp(`^((?:[A-Za-z0-9-]+\\.)?${field}(?:;[^:\\r\\n]*)?:).*$`, 'mi');
         const newLine = `${field}:${value}`;
         if (regex.test(vcard)) {
             return vcard.replace(regex, (match, prefix) => `${prefix}${value}`);
         } else {
-            return vcard.replace('END:VCARD', `${newLine}\nEND:VCARD`);
+            return vcard.replace('END:VCARD', () => `${newLine}\nEND:VCARD`);
         }
     },
 
@@ -1297,20 +1388,20 @@ const Contacts = {
         let vcard = contact.data;
 
         if (updates.fullName) {
-            vcard = this._updateVCardField(vcard, 'FN', updates.fullName);
+            vcard = this._updateVCardField(vcard, 'FN', escapePropertyValue(updates.fullName));
             // Update structured name too
             const nameParts = updates.fullName.split(' ');
             if (nameParts.length >= 2) {
-                const lastName = nameParts[nameParts.length - 1];
-                const firstName = nameParts.slice(0, -1).join(' ');
+                const lastName = escapePropertyValue(nameParts[nameParts.length - 1]);
+                const firstName = escapePropertyValue(nameParts.slice(0, -1).join(' '));
                 vcard = this._updateVCardField(vcard, 'N', `${lastName};${firstName};;;`);
             }
         }
-        if (updates.email) vcard = this._updateVCardField(vcard, 'EMAIL', updates.email);
-        if (updates.phone) vcard = this._updateVCardField(vcard, 'TEL', updates.phone);
-        if (updates.organization) vcard = this._updateVCardField(vcard, 'ORG', updates.organization);
-        if (updates.title) vcard = this._updateVCardField(vcard, 'TITLE', updates.title);
-        if (updates.note) vcard = this._updateVCardField(vcard, 'NOTE', updates.note);
+        if (updates.email) vcard = this._updateVCardField(vcard, 'EMAIL', escapePropertyValue(updates.email));
+        if (updates.phone) vcard = this._updateVCardField(vcard, 'TEL', escapePropertyValue(updates.phone));
+        if (updates.organization) vcard = this._updateVCardField(vcard, 'ORG', escapePropertyValue(updates.organization));
+        if (updates.title) vcard = this._updateVCardField(vcard, 'TITLE', escapePropertyValue(updates.title));
+        if (updates.note) vcard = this._updateVCardField(vcard, 'NOTE', escapePropertyValue(updates.note));
 
         await request(contact.href, {
             method: 'PUT',
@@ -1906,7 +1997,9 @@ async function main() {
                 const dueDate = dueIndex !== -1 ? args[dueIndex + 1] : null;
 
                 const prioIndex = args.indexOf('--priority');
-                const priority = prioIndex !== -1 ? args[prioIndex + 1] : null;
+                const priority = prioIndex !== -1
+                    ? parsePriorityInput(args[prioIndex + 1])
+                    : null;
 
                 const descIndex = args.indexOf('--description');
                 const description = descIndex !== -1 ? args[descIndex + 1] : null;
@@ -1929,7 +2022,9 @@ async function main() {
                 if (dueIndex !== -1) updates.dueDate = args[dueIndex + 1];
                 
                 const prioIndex = args.indexOf('--priority');
-                if (prioIndex !== -1) updates.priority = args[prioIndex + 1];
+                if (prioIndex !== -1) {
+                    updates.priority = parsePriorityInput(args[prioIndex + 1]);
+                }
                 
                 const descIndex = args.indexOf('--description');
                 if (descIndex !== -1) updates.description = args[descIndex + 1];
