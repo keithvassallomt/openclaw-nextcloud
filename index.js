@@ -217,6 +217,91 @@ function parsePriorityInput(value) {
     return String(value);
 }
 
+const MAX_TEXT_INPUT_BYTES = 64 * 1024 * 1024;
+const CONFIRMATION_REQUIRED = new Set([
+    'notes:delete',
+    'files:delete',
+    'calendar:delete',
+    'tasks:delete',
+    'shares:create-link',
+    'shares:delete',
+    'contacts:delete',
+    'boards:delete',
+    'stacks:delete',
+    'cards:delete',
+    'labels:delete'
+]);
+
+function getOptionValue(args, flag) {
+    const index = args.indexOf(flag);
+    if (index === -1) return undefined;
+    const value = args[index + 1];
+    if (value === undefined) {
+        throw new Error(`Missing value for ${flag}`);
+    }
+    return value;
+}
+
+function readTextOption(args, inlineFlag, fileFlag, {
+    required = false,
+    stripFinalNewline = false,
+    maxBytes = MAX_TEXT_INPUT_BYTES
+} = {}) {
+    const inlineValue = getOptionValue(args, inlineFlag);
+    const filePath = getOptionValue(args, fileFlag);
+
+    if (inlineValue !== undefined && filePath !== undefined) {
+        throw new Error(`Use either ${inlineFlag} or ${fileFlag}, not both.`);
+    }
+    if (inlineValue !== undefined) {
+        if (required && inlineValue.length === 0) {
+            throw new Error(`${inlineFlag} must not be empty.`);
+        }
+        return inlineValue;
+    }
+    if (filePath === undefined) {
+        if (required) throw new Error(`Missing ${inlineFlag} or ${fileFlag}`);
+        return undefined;
+    }
+
+    const resolvedPath = path.resolve(filePath);
+    let stat;
+    try {
+        stat = fs.statSync(resolvedPath);
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            throw new Error(`${fileFlag} file not found: ${filePath}`);
+        }
+        throw new Error(`Cannot read ${fileFlag}: ${error.message}`);
+    }
+    if (!stat.isFile()) {
+        throw new Error(`${fileFlag} must reference a regular file.`);
+    }
+    if (stat.size > maxBytes) {
+        throw new Error(`${fileFlag} exceeds the ${maxBytes}-byte safety limit.`);
+    }
+
+    let value = fs.readFileSync(resolvedPath, 'utf8');
+    if (stripFinalNewline) value = value.replace(/\r?\n$/, '');
+    if (required && value.length === 0) {
+        throw new Error(`${fileFlag} must not be empty.`);
+    }
+    return value;
+}
+
+function requireExplicitConfirmation(args, command, subCommand) {
+    const action = `${command}:${subCommand}`;
+    if (!CONFIRMATION_REQUIRED.has(action)) return;
+
+    const confirmation = getOptionValue(args, '--confirm');
+    if (confirmation !== action) {
+        throw new Error(
+            `Refusing ${command} ${subCommand} without explicit confirmation. ` +
+            'See SKILL.md for confirmation requirements.'
+        );
+    }
+}
+
 function ensureArray(item) {
     if (Array.isArray(item)) return item;
     if (item === undefined || item === null) return [];
@@ -319,7 +404,7 @@ const Notes = {
         if (category !== undefined) payload.category = category;
 
         if (Object.keys(payload).length === 0) {
-            throw new Error('Nothing to update. Provide title, content, or category.');
+            throw new Error('Nothing to update. Provide title, content/content-file, or category.');
         }
 
         const data = await request(`/index.php/apps/notes/api/v1/notes/${id}`, {
@@ -1874,6 +1959,8 @@ async function main() {
     const subCommand = args[1];
 
     try {
+        requireExplicitConfirmation(args, command, subCommand);
+
         if (command === 'notes') {
             if (subCommand === 'list') {
                 const result = await Notes.list();
@@ -1885,19 +1972,19 @@ async function main() {
                 output(result);
             } else if (subCommand === 'create') {
                 const titleIndex = args.indexOf('--title');
-                const contentIndex = args.indexOf('--content');
                 const categoryIndex = args.indexOf('--category');
                 
-                if (titleIndex === -1 || contentIndex === -1) {
-                    throw new Error('Missing --title or --content arguments');
+                if (titleIndex === -1) {
+                    throw new Error('Missing --title');
                 }
                 
                 const title = args[titleIndex + 1];
-                const content = args[contentIndex + 1];
+                const content = readTextOption(
+                    args, '--content', '--content-file', { required: true }
+                );
                 const category = categoryIndex !== -1 ? args[categoryIndex + 1] : '';
 
                 if (!title || title.startsWith('--')) throw new Error('Invalid title provided');
-                if (!content || content.startsWith('--')) throw new Error('Invalid content provided');
                 if (category && category.startsWith('--')) throw new Error('Invalid category provided');
 
                 const result = await Notes.create(title, content, category);
@@ -1905,14 +1992,13 @@ async function main() {
             } else if (subCommand === 'edit') {
                 const idIndex = args.indexOf('--id');
                 const titleIndex = args.indexOf('--title');
-                const contentIndex = args.indexOf('--content');
                 const categoryIndex = args.indexOf('--category');
 
                 if (idIndex === -1) throw new Error('Missing --id');
 
                 const id = args[idIndex + 1];
                 const title = titleIndex !== -1 ? args[titleIndex + 1] : undefined;
-                const content = contentIndex !== -1 ? args[contentIndex + 1] : undefined;
+                const content = readTextOption(args, '--content', '--content-file');
                 const category = categoryIndex !== -1 ? args[categoryIndex + 1] : undefined;
 
                 const result = await Notes.update(id, title, content, category);
@@ -1941,9 +2027,9 @@ async function main() {
                 if (pathIndex === -1) throw new Error('Missing --path');
                 const filePath = args[pathIndex + 1];
 
-                const contentIndex = args.indexOf('--content');
-                if (contentIndex === -1) throw new Error('Missing --content');
-                const content = args[contentIndex + 1];
+                const content = readTextOption(
+                    args, '--content', '--content-file', { required: true }
+                );
 
                 output(await Files.upload(filePath, content));
             } else if (subCommand === 'get') {
@@ -1981,8 +2067,9 @@ async function main() {
                 const calIndex = args.indexOf('--calendar');
                 const calendar = calIndex !== -1 ? args[calIndex + 1] : null;
 
-                const descIndex = args.indexOf('--description');
-                const description = descIndex !== -1 ? args[descIndex + 1] : null;
+                const description = readTextOption(
+                    args, '--description', '--description-file'
+                ) ?? null;
 
                 const locIndex = args.indexOf('--location');
                 const location = locIndex !== -1 ? args[locIndex + 1] : null;
@@ -2006,8 +2093,10 @@ async function main() {
                 const endIndex = args.indexOf('--end');
                 if (endIndex !== -1) updates.end = args[endIndex + 1];
 
-                const descIndex = args.indexOf('--description');
-                if (descIndex !== -1) updates.description = args[descIndex + 1];
+                const description = readTextOption(
+                    args, '--description', '--description-file'
+                );
+                if (description !== undefined) updates.description = description;
 
                 const locIndex = args.indexOf('--location');
                 if (locIndex !== -1) updates.location = args[locIndex + 1];
@@ -2047,8 +2136,9 @@ async function main() {
                     ? parsePriorityInput(args[prioIndex + 1])
                     : null;
 
-                const descIndex = args.indexOf('--description');
-                const description = descIndex !== -1 ? args[descIndex + 1] : null;
+                const description = readTextOption(
+                    args, '--description', '--description-file'
+                ) ?? null;
 
                 output(await CalDAV.createTask(title, calendar, dueDate, priority, description));
 
@@ -2072,8 +2162,10 @@ async function main() {
                     updates.priority = parsePriorityInput(args[prioIndex + 1]);
                 }
                 
-                const descIndex = args.indexOf('--description');
-                if (descIndex !== -1) updates.description = args[descIndex + 1];
+                const description = readTextOption(
+                    args, '--description', '--description-file'
+                );
+                if (description !== undefined) updates.description = description;
 
                 output(await CalDAV.updateTask(uid, calendar, updates));
 
@@ -2127,8 +2219,10 @@ async function main() {
                 const permIndex = args.indexOf('--permissions');
                 const permissions = permIndex !== -1 ? args[permIndex + 1] : 'read';
 
-                const pwIndex = args.indexOf('--password');
-                const password = pwIndex !== -1 ? args[pwIndex + 1] : null;
+                const password = readTextOption(
+                    args, '--password', '--password-file',
+                    { stripFinalNewline: true, maxBytes: 16 * 1024 }
+                ) ?? null;
 
                 const expIndex = args.indexOf('--expire');
                 const expireDate = expIndex !== -1 ? args[expIndex + 1] : null;
@@ -2190,8 +2284,8 @@ async function main() {
                 const titleIndex = args.indexOf('--title');
                 if (titleIndex !== -1) options.title = args[titleIndex + 1];
 
-                const noteIndex = args.indexOf('--note');
-                if (noteIndex !== -1) options.note = args[noteIndex + 1];
+                const note = readTextOption(args, '--note', '--note-file');
+                if (note !== undefined) options.note = note;
 
                 output(await Contacts.create(fullName, addressBook, options));
             } else if (subCommand === 'edit') {
@@ -2218,8 +2312,8 @@ async function main() {
                 const titleIndex = args.indexOf('--title');
                 if (titleIndex !== -1) updates.title = args[titleIndex + 1];
 
-                const noteIndex = args.indexOf('--note');
-                if (noteIndex !== -1) updates.note = args[noteIndex + 1];
+                const note = readTextOption(args, '--note', '--note-file');
+                if (note !== undefined) updates.note = note;
 
                 output(await Contacts.update(uid, addressBook, updates));
             } else if (subCommand === 'delete') {
@@ -2301,9 +2395,10 @@ async function main() {
             } else if (subCommand === 'comment-add') {
                 const cardIndex = args.indexOf('--card');
                 if (cardIndex === -1) throw new Error('Missing --card');
-                const msgIndex = args.indexOf('--message');
-                if (msgIndex === -1) throw new Error('Missing --message');
-                output(await Deck.addComment(args[cardIndex + 1], args[msgIndex + 1]));
+                const message = readTextOption(
+                    args, '--message', '--message-file', { required: true }
+                );
+                output(await Deck.addComment(args[cardIndex + 1], message));
             } else if (subCommand === 'comment-delete') {
                 const cardIndex = args.indexOf('--card');
                 if (cardIndex === -1) throw new Error('Missing --card');
@@ -2328,8 +2423,10 @@ async function main() {
                     const titleIndex = args.indexOf('--title');
                     if (titleIndex === -1) throw new Error('Missing --title');
                     const options = {};
-                    const descIndex = args.indexOf('--description');
-                    if (descIndex !== -1) options.description = args[descIndex + 1];
+                    const description = readTextOption(
+                        args, '--description', '--description-file'
+                    );
+                    if (description !== undefined) options.description = description;
                     const dueIndex = args.indexOf('--duedate');
                     if (dueIndex !== -1) options.duedate = args[dueIndex + 1];
                     const orderIndex = args.indexOf('--order');
@@ -2341,8 +2438,10 @@ async function main() {
                     const updates = {};
                     const titleIndex = args.indexOf('--title');
                     if (titleIndex !== -1) updates.title = args[titleIndex + 1];
-                    const descIndex = args.indexOf('--description');
-                    if (descIndex !== -1) updates.description = args[descIndex + 1];
+                    const description = readTextOption(
+                        args, '--description', '--description-file'
+                    );
+                    if (description !== undefined) updates.description = description;
                     const dueIndex = args.indexOf('--duedate');
                     if (dueIndex !== -1) updates.duedate = args[dueIndex + 1];
                     const orderIndex = args.indexOf('--order');

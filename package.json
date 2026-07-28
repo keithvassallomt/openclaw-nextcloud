@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "build": "esbuild index.js --bundle --platform=node --outfile=scripts/nextcloud.js --format=esm",
-    "test": "node test/regressions.mjs"
+    "test": "node test/run.mjs"
   },
   "dependencies": {
     "date-fns": "^2.30.0",
