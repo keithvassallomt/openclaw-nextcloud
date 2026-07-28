@@ -98,8 +98,41 @@ function record(name, passed, details = {}) {
   tests.push({ name, passed, ...details });
 }
 
+for (const filePath of [
+  '.',
+  './',
+  'folder/.',
+  '%2e',
+  'folder/%2e',
+  '..',
+  'folder/..',
+  'folder/%2e%2e'
+]) {
+  const requestCount = requests.length;
+  const pathResult = await run(['files', 'delete', '--path', filePath]);
+  record(
+    `file path ${JSON.stringify(filePath)} is rejected before a DAV request`,
+    pathResult.code !== 0 &&
+      pathResult.stderr.includes('disallowed dot-segments') &&
+      requests.length === requestCount,
+    { result: pathResult }
+  );
+}
+
 let before = requests.length;
-let result = await run([
+let result = await run(['files', 'delete', '--path', 'reports../file.txt']);
+record(
+  'non-segment double dots remain valid in file names',
+  result.code === 0 &&
+    requests.length === before + 1 &&
+    requests.at(-1)?.method === 'DELETE' &&
+    requests.at(-1)?.url ===
+      '/remote.php/dav/files/tester/reports../file.txt',
+  { request: requests.at(-1), result }
+);
+
+before = requests.length;
+result = await run([
   'calendar', 'create',
   '--summary', 'Team\nATTENDEE:mailto:attacker@example.com',
   '--start', '2026-07-28T12:00:00Z',

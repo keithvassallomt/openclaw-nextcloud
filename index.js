@@ -132,19 +132,17 @@ function sanitizePath(filePath) {
     } catch {
         throw new Error('File path contains invalid percent-encoding.');
     }
-    // Reject after decoding: dot-segments, backslashes, null bytes, control chars
-    if (/\.\.(?:\/|\\|$)/.test(decoded) || /(?:\/|^)\.\.(?:\/|\\|$)/.test(decoded)) {
-        throw new Error('File path contains disallowed dot-segments (..).');
+    // Reject complete dot-segments after decoding. Both "." and ".." are
+    // normalized by URL clients and can otherwise alias a different DAV target.
+    const decodedSegments = decoded.split('/');
+    if (decodedSegments.some(segment => segment === '.' || segment === '..')) {
+        throw new Error('File path contains disallowed dot-segments (. or ..).');
     }
     if (/[\x00-\x1f\x7f]/.test(decoded)) {
         throw new Error('File path contains control characters.');
     }
     if (/\\/.test(decoded)) {
         throw new Error('File path contains backslashes.');
-    }
-    // Also check the raw input before decoding as a defense-in-depth measure
-    if (/\.\.(?:\/|%2[ef]|%2[EF])/i.test(filePath) || /%2[ef]%2[ef]/i.test(filePath) || filePath.includes('\x00')) {
-        throw new Error('File path contains disallowed traversal sequences.');
     }
     return decoded;
 }

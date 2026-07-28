@@ -17692,17 +17692,15 @@ function sanitizePath(filePath) {
   } catch {
     throw new Error("File path contains invalid percent-encoding.");
   }
-  if (/\.\.(?:\/|\\|$)/.test(decoded) || /(?:\/|^)\.\.(?:\/|\\|$)/.test(decoded)) {
-    throw new Error("File path contains disallowed dot-segments (..).");
+  const decodedSegments = decoded.split("/");
+  if (decodedSegments.some((segment) => segment === "." || segment === "..")) {
+    throw new Error("File path contains disallowed dot-segments (. or ..).");
   }
   if (/[\x00-\x1f\x7f]/.test(decoded)) {
     throw new Error("File path contains control characters.");
   }
   if (/\\/.test(decoded)) {
     throw new Error("File path contains backslashes.");
-  }
-  if (/\.\.(?:\/|%2[ef]|%2[EF])/i.test(filePath) || /%2[ef]%2[ef]/i.test(filePath) || filePath.includes("\0")) {
-    throw new Error("File path contains disallowed traversal sequences.");
   }
   return decoded;
 }
