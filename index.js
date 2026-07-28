@@ -1139,7 +1139,7 @@ const Contacts = {
         const cleanValue = (val) => val ? val.replace(/&#13;/g, '').replace(/\r/g, '').trim() : null;
 
         const getField = (field) => {
-            const regex = new RegExp(`^${field}(?:;[^:]*)?:(.*)$`, 'mi');
+            const regex = new RegExp(`^(?:[^.]+\\.)?${field}(?:;[^:]*)?:(.*)$`, 'mi');
             const match = vcard.match(regex);
             return match ? cleanValue(match[1]) : null;
         };
@@ -1150,7 +1150,7 @@ const Contacts = {
 
         // Parse phone numbers (can have multiple)
         const phones = [];
-        const phoneRegex = /^TEL(?:;[^:]*)?:(.*)$/gmi;
+        const phoneRegex = /^(?:[^.]+\.)?TEL(?:;[^:]*)?:(.*)$/gmi;
         let phoneMatch;
         while ((phoneMatch = phoneRegex.exec(vcard)) !== null) {
             phones.push(cleanValue(phoneMatch[1]));
@@ -1158,7 +1158,7 @@ const Contacts = {
 
         // Parse emails (can have multiple)
         const emails = [];
-        const emailRegex = /^EMAIL(?:;[^:]*)?:(.*)$/gmi;
+        const emailRegex = /^(?:[^.]+\.)?EMAIL(?:;[^:]*)?:(.*)$/gmi;
         let emailMatch;
         while ((emailMatch = emailRegex.exec(vcard)) !== null) {
             emails.push(cleanValue(emailMatch[1]));
@@ -1281,10 +1281,10 @@ const Contacts = {
     },
 
     _updateVCardField(vcard, field, value) {
-        const regex = new RegExp(`^${field}(?:;[^:]*)?:.*$`, 'mi');
+        const regex = new RegExp(`^((?:[^.]+\\.)?${field}(?:;[^:]*)?:).*$`, 'mi');
         const newLine = `${field}:${value}`;
         if (regex.test(vcard)) {
-            return vcard.replace(regex, newLine);
+            return vcard.replace(regex, (match, prefix) => `${prefix}${value}`);
         } else {
             return vcard.replace('END:VCARD', `${newLine}\nEND:VCARD`);
         }

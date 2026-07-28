@@ -1,0 +1,46 @@
+name: bundle
+
+# scripts/nextcloud.js is a build artifact, but it is also the file end users
+# and agents actually run — the skill's no-install promise depends on it being
+# committed. That makes it possible to change one half of the pair and ship a
+# bundle that no longer matches its source, in either direction. This job
+# rebuilds from index.js and fails if the committed bundle differs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    name: committed bundle matches index.js
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Check for drift
+        run: |
+          if ! git diff --exit-code --stat scripts/nextcloud.js; then
+            echo
+            echo "::error file=scripts/nextcloud.js::Committed bundle does not match a fresh build of index.js"
+            echo "Rebuilding index.js produced a different scripts/nextcloud.js."
+            echo
+            echo "This usually means a change landed in only one of the two files."
+            echo "Fix it by running the build locally and committing both together:"
+            echo
+            echo "    npm install && npm run build"
+            echo "    git add index.js scripts/nextcloud.js"
+            echo
+            echo "Full diff between the committed bundle and the fresh build:"
+            git --no-pager diff scripts/nextcloud.js
+            exit 1
+          fi
