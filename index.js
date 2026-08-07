@@ -1712,7 +1712,7 @@ const Deck = {
 
     async deleteBoard(boardId) {
         if (!boardId) throw new Error('Board ID is required for deletion.');
-        await request(`${this._base}/boards/${boardId}`, { method: 'DELETE', headers: this._headers });
+        await request(`${this._base}/boards/${boardId}`, { method: 'DELETE', headers: this._jsonHeaders });
         return { success: true, id: boardId };
     },
 
@@ -1761,7 +1761,7 @@ const Deck = {
 
     async deleteStack(boardId, stackId) {
         if (!boardId || !stackId) throw new Error('Board ID and Stack ID are required for deletion.');
-        await request(`${this._base}/boards/${boardId}/stacks/${stackId}`, { method: 'DELETE', headers: this._headers });
+        await request(`${this._base}/boards/${boardId}/stacks/${stackId}`, { method: 'DELETE', headers: this._jsonHeaders });
         return { success: true, id: stackId };
     },
 
@@ -1818,7 +1818,7 @@ const Deck = {
 
     async deleteCard(boardId, stackId, cardId) {
         if (!boardId || !stackId || !cardId) throw new Error('Board ID, Stack ID and Card ID are required for deletion.');
-        await request(`${this._base}/boards/${boardId}/stacks/${stackId}/cards/${cardId}`, { method: 'DELETE', headers: this._headers });
+        await request(`${this._base}/boards/${boardId}/stacks/${stackId}/cards/${cardId}`, { method: 'DELETE', headers: this._jsonHeaders });
         return { success: true, id: cardId };
     },
 
@@ -1898,7 +1898,7 @@ const Deck = {
 
     async deleteLabel(boardId, labelId) {
         if (!boardId || !labelId) throw new Error('Board ID and Label ID are required for deletion.');
-        await request(`${this._base}/boards/${boardId}/labels/${labelId}`, { method: 'DELETE', headers: this._headers });
+        await request(`${this._base}/boards/${boardId}/labels/${labelId}`, { method: 'DELETE', headers: this._jsonHeaders });
         return { success: true, id: labelId };
     },
 
