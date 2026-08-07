@@ -768,11 +768,7 @@ const CalDAV = {
                 </d:prop>
                 <c:filter>
                     <c:comp-filter name="VCALENDAR">
-                        <c:comp-filter name="VTODO">
-                            <c:prop-filter name="STATUS">
-                                <c:text-match negate-condition="yes">COMPLETED</c:text-match>
-                            </c:prop-filter>
-                        </c:comp-filter>
+                        <c:comp-filter name="VTODO" />
                     </c:comp-filter>
                 </c:filter>
             </c:calendar-query>
@@ -805,12 +801,18 @@ const CalDAV = {
                      const dueMatch = calData.match(/DUE(?:;.*)?:(.*)/);
                      const priorityMatch = calData.match(/PRIORITY:(.*)/);
 
+                     const status = statusMatch ? statusMatch[1].trim() : 'NEEDS-ACTION';
+                     // CalDAV prop-filter on STATUS only matches VTODOs where STATUS exists (RFC 4791 §3.6.4).
+                     // Post-filter completed tasks so VTODOs with an implicit STATUS:NEEDS-ACTION
+                     // (e.g. todos created by the Nextcloud Tasks web UI) are still returned.
+                     if (status === 'COMPLETED') continue;
+
                      allTodos.push({
                          uid: uidMatch ? uidMatch[1].trim() : 'No UID',
                          calendar: cal.displayname,
                          summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : 'No Title',
                          description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
-                         status: statusMatch ? statusMatch[1].trim() : 'NEEDS-ACTION',
+                         status: status,
                          due: dueMatch ? dueMatch[1].trim() : null,
                          priority: priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : null
                      });
