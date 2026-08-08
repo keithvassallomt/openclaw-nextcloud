@@ -18205,11 +18205,7 @@ var CalDAV = {
                 </d:prop>
                 <c:filter>
                     <c:comp-filter name="VCALENDAR">
-                        <c:comp-filter name="VTODO">
-                            <c:prop-filter name="STATUS">
-                                <c:text-match negate-condition="yes">COMPLETED</c:text-match>
-                            </c:prop-filter>
-                        </c:comp-filter>
+                        <c:comp-filter name="VTODO" />
                     </c:comp-filter>
                 </c:filter>
             </c:calendar-query>
@@ -18232,16 +18228,18 @@ var CalDAV = {
           const unfolded = calData.replace(/\r?\n[ \t]/g, "");
           const summaryMatch = calData.match(/SUMMARY:(.*)/);
           const descriptionMatch = unfolded.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
-          const statusMatch = calData.match(/STATUS:(.*)/);
+          const statusMatch = unfolded.match(/^STATUS(?:;[^:]*)?:(.*)$/m);
           const uidMatch = calData.match(/UID:(.*)/);
           const dueMatch = calData.match(/DUE(?:;.*)?:(.*)/);
           const priorityMatch = calData.match(/PRIORITY:(.*)/);
+          const status = statusMatch ? statusMatch[1].trim() : "NEEDS-ACTION";
+          if (status === "COMPLETED") continue;
           allTodos.push({
             uid: uidMatch ? uidMatch[1].trim() : "No UID",
             calendar: cal.displayname,
             summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : "No Title",
             description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
-            status: statusMatch ? statusMatch[1].trim() : "NEEDS-ACTION",
+            status,
             due: dueMatch ? dueMatch[1].trim() : null,
             priority: priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : null
           });

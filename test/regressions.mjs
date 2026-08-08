@@ -87,6 +87,59 @@ END:VTODO
 END:VCALENDAR</cal:calendar-data>
     </d:prop></d:propstat>
   </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/calendars/tester/personal/web.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"web"</d:getetag>
+      <cal:calendar-data>BEGIN:VCALENDAR
+PRODID:-//Nextcloud Tasks v0.18.1
+BEGIN:VTODO
+UID:task-no-status
+SUMMARY:Created in the web UI
+END:VTODO
+END:VCALENDAR</cal:calendar-data>
+    </d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/calendars/tester/personal/done.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"done"</d:getetag>
+      <cal:calendar-data>BEGIN:VCALENDAR
+BEGIN:VTODO
+UID:task-completed
+SUMMARY:Already finished
+STATUS:COMPLETED
+END:VTODO
+END:VCALENDAR</cal:calendar-data>
+    </d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/calendars/tester/personal/mentions.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"mentions"</d:getetag>
+      <cal:calendar-data>BEGIN:VCALENDAR
+BEGIN:VTODO
+UID:task-mentions-status
+SUMMARY:Audit the tracker
+DESCRIPTION:remember to set STATUS:COMPLETED
+END:VTODO
+END:VCALENDAR</cal:calendar-data>
+    </d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/calendars/tester/personal/delegated.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"delegated"</d:getetag>
+      <cal:calendar-data>BEGIN:VCALENDAR
+BEGIN:VTODO
+UID:task-request-status
+SUMMARY:Delegated and finished
+REQUEST-STATUS:2.0;Success
+STATUS:COMPLETED
+END:VTODO
+END:VCALENDAR</cal:calendar-data>
+    </d:prop></d:propstat>
+  </d:response>
 </d:multistatus>`;
 
 const server = http.createServer(async (req, res) => {
@@ -241,11 +294,13 @@ record(
 );
 
 result = await run(['tasks', 'list', '--calendar', 'Personal']);
+let listedTasks = [];
 let listedTask = null;
 try {
-  listedTask = JSON.parse(result.stdout)?.data?.[0] ?? null;
+  listedTasks = JSON.parse(result.stdout)?.data ?? [];
+  listedTask = listedTasks[0] ?? null;
 } catch {
-  // The assertion below preserves the parse failure as test evidence.
+  // The assertions below preserve the parse failure as test evidence.
 }
 record(
   'task text values are unescaped when read',
@@ -253,6 +308,28 @@ record(
     listedTask?.summary === 'Call Alice, Bob' &&
     listedTask?.description === 'First line\nSecond line',
   { listedTask, result }
+);
+
+const listedUids = listedTasks.map(task => task.uid);
+record(
+  'tasks without a STATUS property are listed as NEEDS-ACTION',
+  listedTasks.find(task => task.uid === 'task-no-status')?.status === 'NEEDS-ACTION',
+  { listedUids, result }
+);
+record(
+  'completed tasks stay hidden from tasks list',
+  !listedUids.includes('task-completed'),
+  { listedUids, result }
+);
+record(
+  'a description mentioning STATUS: does not hide an active task',
+  listedTasks.find(task => task.uid === 'task-mentions-status')?.status === 'NEEDS-ACTION',
+  { listedUids, result }
+);
+record(
+  'REQUEST-STATUS does not mask a completed task',
+  !listedUids.includes('task-request-status'),
+  { listedUids, result }
 );
 
 before = requests.length;
