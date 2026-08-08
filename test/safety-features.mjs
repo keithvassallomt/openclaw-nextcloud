@@ -19,6 +19,7 @@ const server = http.createServer(async (req, res) => {
   requests.push({
     method: req.method,
     url: req.url,
+    headers: req.headers,
     body
   });
 
@@ -263,6 +264,49 @@ record(
     requests.length === before,
   { result }
 );
+
+// Nextcloud's Deck API answers 403 to a DELETE that arrives without a JSON
+// content type, so these four requests must carry the same headers as the
+// POST/PUT methods beside them rather than the bare listing headers.
+const deckDeletes = [
+  {
+    name: 'boards delete',
+    args: ['boards', 'delete', '--board', '1', '--confirm', 'boards:delete'],
+    url: '/index.php/apps/deck/api/v1.1/boards/1'
+  },
+  {
+    name: 'stacks delete',
+    args: ['stacks', 'delete', '--board', '1', '--stack', '2',
+           '--confirm', 'stacks:delete'],
+    url: '/index.php/apps/deck/api/v1.1/boards/1/stacks/2'
+  },
+  {
+    name: 'cards delete',
+    args: ['cards', 'delete', '--board', '1', '--stack', '2', '--card', '3',
+           '--confirm', 'cards:delete'],
+    url: '/index.php/apps/deck/api/v1.1/boards/1/stacks/2/cards/3'
+  },
+  {
+    name: 'labels delete',
+    args: ['labels', 'delete', '--board', '1', '--label', '4',
+           '--confirm', 'labels:delete'],
+    url: '/index.php/apps/deck/api/v1.1/boards/1/labels/4'
+  }
+];
+
+for (const deckDelete of deckDeletes) {
+  before = requests.length;
+  result = await run(deckDelete.args);
+  const sent = requests.slice(before).find(entry => entry.method === 'DELETE');
+  record(
+    `${deckDelete.name} sends a JSON content type`,
+    result.code === 0 &&
+      sent?.url === deckDelete.url &&
+      sent?.headers['content-type'] === 'application/json' &&
+      sent?.headers['ocs-apirequest'] === 'true',
+    { request: sent, result }
+  );
+}
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
   await new Promise(resolveClose => server.close(resolveClose));
