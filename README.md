@@ -17,7 +17,7 @@ A Node.js CLI tool for interacting with Nextcloud services including notes, file
 
 ## Prerequisites
 
-- Node.js 20 or higher
+- Node.js 24 or higher
 - A Nextcloud instance with API access
 - An app password for your Nextcloud account
 

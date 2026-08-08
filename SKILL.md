@@ -1,7 +1,7 @@
 ---
 name: openclaw-nextcloud
 description: Manage Notes, Tasks, Calendar, Files, Contacts, and Deck Kanban boards in your Nextcloud instance via CalDAV, WebDAV, Notes, and Deck APIs. Use for creating notes, managing todos and calendar events, uploading/downloading files, managing contacts, and organizing Kanban boards, stacks, and cards.
-compatibility: Requires Node.js 20+ and a Nextcloud app password (NEXTCLOUD_TOKEN) granting full account-scope access. Reads NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_TOKEN. HTTPS-only egress to NEXTCLOUD_URL. Performs destructive, non-transactional writes (delete/edit/share); see Safety section in body.
+compatibility: Requires Node.js 24+ and a Nextcloud app password (NEXTCLOUD_TOKEN) granting full account-scope access. Reads NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_TOKEN. HTTPS-only egress to NEXTCLOUD_URL. Performs destructive, non-transactional writes (delete/edit/share); see Safety section in body.
 allowed-tools: Bash Read
 metadata:
   openclaw:
@@ -38,7 +38,7 @@ This skill provides integration with a Nextcloud instance. It supports access to
 
 ## Requirements
 
-- **Node.js 20+** on PATH (`node scripts/nextcloud.js` in Claude Code or a
+- **Node.js 24+** on PATH (`node scripts/nextcloud.js` in Claude Code or a
   source checkout; `node {baseDir}/scripts/nextcloud.js` in OpenClaw).
 - **Network egress** to `NEXTCLOUD_URL` only — the skill makes no other outbound calls.
 - **Environment variables** (see Configuration below). All three are required at runtime; without them the script exits with a clear error before making any request.
