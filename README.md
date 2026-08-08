@@ -466,6 +466,7 @@ Thanks to:
 - [@makefu](https://github.com/makefu) — Kanban Boards support.
 - [@bolinches](https://github.com/bolinches) — fix for secondary calendars advertising multiple component types being dropped from event/task operations, and vCard 3.0 group prefix handling (`item1.EMAIL`, `item2.TEL`) in the contact parser.
 - [@sam2kb](https://github.com/sam2kb) — security review and the fixes behind 0.4.0: WebDAV path traversal, iCalendar/vCard value escaping and unescaping, `PRIORITY` injection, confirmation tokens for irreversible operations, file-backed text and secret inputs, `skillKey` config stability, and the project's first test suites.
+- [@kens-agents](https://github.com/kens-agents) — fix for `tasks list` hiding tasks created in the Nextcloud Tasks web app, which omit `STATUS`: per RFC 4791 §3.6.4 the CalDAV `prop-filter` only matched VTODOs that declare the property; and fix for Deck `boards`/`stacks`/`cards`/`labels` `delete` returning 403 without a JSON content type on the request. Discovered and reproduced by [@kendawson-online](https://github.com/kendawson-online).
 
 ## License
 
