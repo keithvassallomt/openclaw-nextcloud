@@ -23,7 +23,10 @@ jobs:
           node-version: '24'
           cache: npm
 
-      - run: npm ci
+      # --ignore-scripts stops esbuild's postinstall from fetching a binary over
+      # the network at install time; the platform package in the lockfile already
+      # supplies it. The bundle this produces is byte-identical either way.
+      - run: npm ci --ignore-scripts
 
       - run: npm run build
 

@@ -439,12 +439,20 @@ A static analyser scanning this skill will likely flag rules in the family of `s
 - HTTPS is enforced at startup (see above), so the credential cannot be sent in cleartext without an explicit opt-in.
 - There is no telemetry, analytics, auto-update, or third-party callback. The script makes one outbound destination — your Nextcloud — and exits.
 
+**Supply chain**
+
+Automated skill scanners commonly report three findings against this repository. All three are accurate observations; here is what each one is actually pointing at.
+
+- **Unpinned dependencies.** The two runtime dependencies and the one build dependency are now pinned to exact versions in `package.json`, with `package-lock.json` (lockfile v3) carrying an integrity hash for every resolved package. Note that none of this is in the install path for end users: the skill ships pre-bundled, so nothing is resolved or downloaded when you run it.
+- **External script fetching.** No part of this skill fetches code. The source contains no `eval`, no `new Function`, no dynamic `import()`, no `child_process`, and no hard-coded hosts — every request is built from `NEXTCLOUD_URL`. What a scanner is seeing is `esbuild`'s `postinstall`, which downloads a platform binary from `registry.npmjs.org`. That is a *build* dependency: it never runs for end users, and CI installs with `npm ci --ignore-scripts` so it does not run there either. The bundle is byte-identical with the script suppressed.
+- **Obfuscated code.** `scripts/nextcloud.js` is 19,000+ lines of ordinary formatted JavaScript, averaging under 40 characters per line, and is not minified, packed, or encoded. It is large because dependency source is vendored into it — that is what makes the no-install promise possible. Rather than take that on trust, verify it: the reproduction steps below rebuild it from source, and CI fails the build if the committed bundle differs from a fresh one.
+
 **Auditing the bundle**
 
 `scripts/nextcloud.js` is the output of running `esbuild` over `index.js` plus the two declared dependencies. To verify the bundle matches the source:
 
 ```bash
-npm install
+npm ci --ignore-scripts
 npm run build
 git diff scripts/nextcloud.js   # should report no changes
 ```
