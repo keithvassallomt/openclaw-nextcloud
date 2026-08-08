@@ -107,6 +107,23 @@ nix shell .#default --command npm install
 nix shell .#default --command npm run build
 ```
 
+### Packaging a submission
+
+`npm run package` collects the six files a ClawHub submission needs —
+`SKILL.md`, `README.md`, `index.js`, `package.json`, `package-lock.json` and
+`scripts/nextcloud.js` — into `~/Downloads/openclaw-nextcloud`, leaving the
+tests, CI config, flake and git metadata behind.
+
+```bash
+npm run package                     # -> ~/Downloads/openclaw-nextcloud
+npm run package -- --out /tmp       # -> /tmp/openclaw-nextcloud
+npm run package -- --force          # replace an existing folder
+```
+
+It refuses to run if `scripts/nextcloud.js` does not match a fresh build of
+`index.js`, so a stale bundle cannot reach a submission; `--skip-verify`
+overrides that.
+
 ## Configuration
 
 For an OpenClaw installation, configure the non-secret values under the
