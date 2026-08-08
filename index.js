@@ -1947,7 +1947,7 @@ const Deck = {
     async deleteComment(cardId, commentId) {
         if (!cardId || !commentId) throw new Error('Card ID and Comment ID are required for deletion.');
         const envelope = await request(`${this._commentsBase(cardId)}/${commentId}`, {
-            method: 'DELETE', headers: this._headers
+            method: 'DELETE', headers: this._jsonHeaders
         });
         this._unwrapOcs(envelope);
         return { success: true, id: commentId };

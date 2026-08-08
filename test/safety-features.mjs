@@ -39,6 +39,14 @@ const server = http.createServer(async (req, res) => {
         }
       }
     }));
+  } else if (req.url?.startsWith('/ocs/v2.php/apps/deck/api/v1.0/cards/')) {
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({
+      ocs: {
+        meta: { status: 'ok', statuscode: 200, message: 'OK' },
+        data: []
+      }
+    }));
   } else if (req.url?.startsWith('/index.php/apps/notes/api/v1/notes/')) {
     res.setHeader('content-type', 'application/json');
     res.end('{}');
@@ -291,6 +299,13 @@ const deckDeletes = [
     args: ['labels', 'delete', '--board', '1', '--label', '4',
            '--confirm', 'labels:delete'],
     url: '/index.php/apps/deck/api/v1.1/boards/1/labels/4'
+  },
+  {
+    // Comments answer on the OCS base rather than the Deck one, so they are
+    // covered separately to catch the header drifting back on that path alone.
+    name: 'cards comment-delete',
+    args: ['cards', 'comment-delete', '--card', '5', '--comment', '6'],
+    url: '/ocs/v2.php/apps/deck/api/v1.0/cards/5/comments/6'
   }
 ];
 
