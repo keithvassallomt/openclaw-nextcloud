@@ -796,7 +796,9 @@ const CalDAV = {
 
                      const summaryMatch = calData.match(/SUMMARY:(.*)/);
                      const descriptionMatch = unfolded.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
-                     const statusMatch = calData.match(/STATUS:(.*)/);
+                     // Anchored so REQUEST-STATUS, or a DESCRIPTION mentioning "STATUS:", cannot be
+                     // mistaken for the task's own status now that it decides visibility below.
+                     const statusMatch = unfolded.match(/^STATUS(?:;[^:]*)?:(.*)$/m);
                      const uidMatch = calData.match(/UID:(.*)/);
                      const dueMatch = calData.match(/DUE(?:;.*)?:(.*)/);
                      const priorityMatch = calData.match(/PRIORITY:(.*)/);
