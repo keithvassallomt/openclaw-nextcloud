@@ -74,6 +74,17 @@ const parser = new XMLParser({
 
 // --- Helpers ---
 
+let _lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL_MS = parseInt(process.env.OPENCLAW_MIN_REQUEST_INTERVAL_MS || '100', 10);
+
+async function throttle() {
+    const wait = _lastRequestTime + MIN_REQUEST_INTERVAL_MS - Date.now();
+    if (wait > 0) {
+        await new Promise(resolve => setTimeout(resolve, wait));
+    }
+    _lastRequestTime = Date.now();
+}
+
 async function request(endpoint, options = {}) {
     const url = `${CONFIG.url}${endpoint}`;
     const headers = {
@@ -83,6 +94,7 @@ async function request(endpoint, options = {}) {
     };
 
     try {
+        await throttle();
         const response = await fetch(url, { ...options, headers });
         if (!response.ok) {
             const err = new Error(`HTTP ${response.status}: ${response.statusText}`);
