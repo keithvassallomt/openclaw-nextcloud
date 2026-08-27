@@ -17723,7 +17723,8 @@ import crypto from "node:crypto";
 var CONFIG = {
   url: process.env.NEXTCLOUD_URL,
   user: process.env.NEXTCLOUD_USER,
-  token: process.env.NEXTCLOUD_TOKEN
+  token: process.env.NEXTCLOUD_TOKEN,
+  email: process.env.NEXTCLOUD_EMAIL || null
 };
 if (!CONFIG.url || !CONFIG.user || !CONFIG.token) {
   console.error(JSON.stringify({
@@ -18560,6 +18561,16 @@ DTEND:${toCalDavDate(end)}
 `;
     if (location) vevent += `LOCATION:${escapePropertyValue(location)}
 `;
+    if (CONFIG.email) {
+      const email = CONFIG.email;
+      const cn = CONFIG.user || email.split("@")[0];
+      vevent += `STATUS:CONFIRMED
+`;
+      vevent += `ORGANIZER;CN=${escapePropertyValue(cn)}:mailto:${email}
+`;
+      vevent += `ATTENDEE;CN=${escapePropertyValue(cn)};ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:${email}
+`;
+    }
     vevent += `END:VEVENT
 END:VCALENDAR`;
     const filename = `${uid}.ics`;
