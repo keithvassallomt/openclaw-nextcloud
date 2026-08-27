@@ -176,8 +176,8 @@ password files.
 
 ### Tasks
 - `tasks list [--calendar <c>]`
-- `tasks create --title <t> [--calendar <c>] [--due <d>] [--priority <p>] [--description <d> | --description-file <file>]`
-- `tasks edit --uid <u> [--calendar <c>] [--title <t>] [--due <d>] [--priority <p>] [--description <d> | --description-file <file>]`
+- `tasks create --title <t> [--calendar <c>] [--start <d>] [--due <d>] [--priority <p>] [--description <d> | --description-file <file>] [--location <l>] [--url <u>] [--class PUBLIC|PRIVATE|CONFIDENTIAL] [--tags <comma-separated>]`
+- `tasks edit --uid <u> [--calendar <c>] [--title <t>] [--start <d>] [--due <d>] [--priority <p>] [--description <d> | --description-file <file>] [--location <l>] [--url <u>] [--class PUBLIC|PRIVATE|CONFIDENTIAL] [--tags <comma-separated>] [--status <s>] [--percent-complete <n>]`
 - `tasks delete --uid <u> [--calendar <c>] --confirm tasks:delete`
 - `tasks complete --uid <u> [--calendar <c>]`
 

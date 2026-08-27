@@ -245,6 +245,43 @@ function parsePriorityInput(value) {
     return String(value);
 }
 
+function parseStatusInput(value) {
+    const normalized = String(value).toUpperCase();
+    const validStatuses = ['NEEDS-ACTION', 'IN-PROCESS', 'COMPLETED', 'CANCELLED'];
+    if (!validStatuses.includes(normalized)) {
+        throw new Error(`Invalid status '${value}'. Valid values: ${validStatuses.join(', ')}.`);
+    }
+    return normalized;
+}
+
+function parsePercentCompleteInput(value) {
+    const str = String(value);
+    if (!/^\d{1,3}$/.test(str)) {
+        throw new Error('Percent-complete must be an integer from 0 to 100.');
+    }
+    const num = parseInt(str, 10);
+    if (num < 0 || num > 100) {
+        throw new Error('Percent-complete must be between 0 and 100.');
+    }
+    return String(num);
+}
+
+function parseClassInput(value) {
+    const normalized = String(value).toUpperCase();
+    const validClasses = ['PUBLIC', 'PRIVATE', 'CONFIDENTIAL'];
+    if (!validClasses.includes(normalized)) {
+        throw new Error(`Invalid class '${value}'. Valid values: ${validClasses.join(', ')}.`);
+    }
+    return normalized;
+}
+
+function parseTagsInput(value) {
+    if (typeof value !== 'string' || value.trim() === '') {
+        return [];
+    }
+    return value.split(',').map(tag => tag.trim()).filter(Boolean);
+}
+
 const MAX_TEXT_INPUT_BYTES = 64 * 1024 * 1024;
 const CONFIRMATION_REQUIRED = new Set([
     'notes:delete',
@@ -371,6 +408,16 @@ function parseDateInput(str) {
         throw new Error(`Invalid date '${str}'. Use ISO 8601 (2026-04-15T17:00:00Z) or CalDAV compact format (20260415T170000Z).`);
     }
     return date;
+}
+
+function toCalDavDate(date) {
+    return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+}
+
+function validateTaskDates(startDate, dueDate) {
+    if (startDate && dueDate && startDate.getTime() > dueDate.getTime()) {
+        throw new Error('Start date must be earlier than or equal to due date.');
+    }
 }
 
 // --- Modules ---
@@ -828,8 +875,13 @@ const CalDAV = {
                      // mistaken for the task's own status now that it decides visibility below.
                      const statusMatch = unfolded.match(/^STATUS(?:;[^:]*)?:(.*)$/m);
                      const uidMatch = calData.match(/UID:(.*)/);
+                     const startMatch = calData.match(/DTSTART(?:;.*)?:(.*)/);
                      const dueMatch = calData.match(/DUE(?:;.*)?:(.*)/);
                      const priorityMatch = calData.match(/PRIORITY:(.*)/);
+                     const locationMatch = unfolded.match(/^LOCATION(?:;[^:]*)?:(.*)$/m);
+                     const urlMatch = unfolded.match(/^URL(?:;[^:]*)?:(.*)$/m);
+                     const classMatch = unfolded.match(/^CLASS(?:;[^:]*)?:(.*)$/m);
+                     const categoriesMatch = unfolded.match(/^CATEGORIES(?:;[^:]*)?:(.*)$/m);
 
                      const status = statusMatch ? statusMatch[1].trim() : 'NEEDS-ACTION';
                      // CalDAV prop-filter on STATUS only matches VTODOs where STATUS exists (RFC 4791 §3.6.4).
@@ -837,14 +889,39 @@ const CalDAV = {
                      // (e.g. todos created by the Nextcloud Tasks web UI) are still returned.
                      if (status === 'COMPLETED') continue;
 
+                     let tags = null;
+                     if (categoriesMatch) {
+                         const rawTags = categoriesMatch[1].trim();
+                         const split = [];
+                         let current = '';
+                         for (let i = 0; i < rawTags.length; i++) {
+                             const char = rawTags[i];
+                             if (char === '\\' && i + 1 < rawTags.length) {
+                                 current += char + rawTags[++i];
+                             } else if (char === ',') {
+                                 split.push(current);
+                                 current = '';
+                             } else {
+                                 current += char;
+                             }
+                         }
+                         split.push(current);
+                         tags = split.map(t => unescapePropertyValue(t.trim())).filter(Boolean);
+                     }
+
                      allTodos.push({
                          uid: uidMatch ? uidMatch[1].trim() : 'No UID',
                          calendar: cal.displayname,
                          summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : 'No Title',
                          description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
                          status: status,
+                         start: startMatch ? startMatch[1].trim() : null,
                          due: dueMatch ? dueMatch[1].trim() : null,
-                         priority: priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : null
+                         priority: priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : null,
+                         location: locationMatch ? unescapePropertyValue(locationMatch[1].trim()) : null,
+                         url: urlMatch ? unescapePropertyValue(urlMatch[1].trim()) : null,
+                         class: classMatch ? classMatch[1].trim().toUpperCase() : null,
+                         tags: tags
                      });
                  }
              } catch (e) {
@@ -948,21 +1025,29 @@ const CalDAV = {
         return vcal.replace(endMatch[0], () => `${newLine}\n${endMatch[0]}`);
     },
 
-    async createTask(title, calendarName, dueDate, priority, description) {
+    async createTask(title, calendarName, options = {}) {
+        const start = options.startDate ? parseDateInput(options.startDate) : null;
+        const due = options.dueDate ? parseDateInput(options.dueDate) : null;
+        validateTaskDates(start, due);
+
         const cal = await this.getCalendar(calendarName, 'VTODO');
         const uid = crypto.randomUUID();
         const now = new Date();
-        const dtstamp = format(now, "yyyyMMdd'T'HHmmss'Z'");
+        const dtstamp = toCalDavDate(now);
 
         let vtodo = `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OpenClaw//Nextcloud Skill//EN\nBEGIN:VTODO\nUID:${uid}\nDTSTAMP:${dtstamp}\nSUMMARY:${escapePropertyValue(title)}\nSTATUS:NEEDS-ACTION\n`;
 
-        if (dueDate) {
-             const due = parseDateInput(dueDate);
-             vtodo += `DUE:${format(due, "yyyyMMdd'T'HHmmss'Z'")}\n`;
-        }
+        if (start) vtodo += `DTSTART:${toCalDavDate(start)}\n`;
+        if (due) vtodo += `DUE:${toCalDavDate(due)}\n`;
 
-        if (priority) vtodo += `PRIORITY:${priority}\n`;
-        if (description) vtodo += `DESCRIPTION:${escapePropertyValue(description)}\n`;
+        if (options.priority) vtodo += `PRIORITY:${options.priority}\n`;
+        if (options.description) vtodo += `DESCRIPTION:${escapePropertyValue(options.description)}\n`;
+        if (options.location) vtodo += `LOCATION:${escapePropertyValue(options.location)}\n`;
+        if (options.url) vtodo += `URL:${escapePropertyValue(options.url)}\n`;
+        if (options.className) vtodo += `CLASS:${options.className}\n`;
+        if (options.tags && options.tags.length > 0) {
+            vtodo += `CATEGORIES:${options.tags.map(escapePropertyValue).join(',')}\n`;
+        }
 
         vtodo += `END:VTODO\nEND:VCALENDAR`;
 
@@ -991,10 +1076,38 @@ const CalDAV = {
         if (updates.title) vtodo = this._updateProperty(vtodo, 'SUMMARY', escapePropertyValue(updates.title));
         if (updates.priority) vtodo = this._updateProperty(vtodo, 'PRIORITY', updates.priority);
         if (updates.description) vtodo = this._updateProperty(vtodo, 'DESCRIPTION', escapePropertyValue(updates.description));
-        if (updates.dueDate) {
-             const due = parseDateInput(updates.dueDate);
-             vtodo = this._updateProperty(vtodo, 'DUE', format(due, "yyyyMMdd'T'HHmmss'Z'"));
+        if (updates.startDate || updates.dueDate) {
+            const start = updates.startDate ? parseDateInput(updates.startDate) : null;
+            const due = updates.dueDate ? parseDateInput(updates.dueDate) : null;
+            // Validate against the existing dates when only one side is being changed.
+            const existingStartMatch = vtodo.match(/DTSTART(?:;.*)?:(.*)/);
+            const existingDueMatch = vtodo.match(/DUE(?:;.*)?:(.*)/);
+            const existingStart = existingStartMatch ? parseDateInput(existingStartMatch[1].trim()) : null;
+            const existingDue = existingDueMatch ? parseDateInput(existingDueMatch[1].trim()) : null;
+            validateTaskDates(start || existingStart, due || existingDue);
+
+            if (start) vtodo = this._updateProperty(vtodo, 'DTSTART', toCalDavDate(start));
+            if (due) vtodo = this._updateProperty(vtodo, 'DUE', toCalDavDate(due));
         }
+        if (updates.location !== undefined) {
+            vtodo = this._updateProperty(vtodo, 'LOCATION', updates.location === null ? null : escapePropertyValue(updates.location));
+        }
+        if (updates.url !== undefined) {
+            vtodo = this._updateProperty(vtodo, 'URL', updates.url === null ? null : escapePropertyValue(updates.url));
+        }
+        if (updates.className !== undefined) {
+            vtodo = this._updateProperty(vtodo, 'CLASS', updates.className);
+        }
+        if (updates.tags !== undefined) {
+            if (updates.tags === null || updates.tags.length === 0) {
+                vtodo = this._updateProperty(vtodo, 'CATEGORIES', null);
+            } else {
+                vtodo = this._updateProperty(vtodo, 'CATEGORIES', updates.tags.map(escapePropertyValue).join(','));
+            }
+        }
+
+        if (updates.status) vtodo = this._updateProperty(vtodo, 'STATUS', updates.status);
+        if (updates.percentComplete !== undefined) vtodo = this._updateProperty(vtodo, 'PERCENT-COMPLETE', updates.percentComplete);
 
         await request(task.href, {
             method: 'PUT',
@@ -2188,7 +2301,30 @@ async function main() {
                     args, '--description', '--description-file'
                 ) ?? null;
 
-                output(await CalDAV.createTask(title, calendar, dueDate, priority, description));
+                const options = {
+                    title,
+                    calendar,
+                    dueDate,
+                    priority,
+                    description
+                };
+
+                const startIndex = args.indexOf('--start');
+                if (startIndex !== -1) options.startDate = args[startIndex + 1];
+
+                const locIndex = args.indexOf('--location');
+                if (locIndex !== -1) options.location = args[locIndex + 1];
+
+                const urlIndex = args.indexOf('--url');
+                if (urlIndex !== -1) options.url = args[urlIndex + 1];
+
+                const classIndex = args.indexOf('--class');
+                if (classIndex !== -1) options.className = parseClassInput(args[classIndex + 1]);
+
+                const tagsIndex = args.indexOf('--tags');
+                if (tagsIndex !== -1) options.tags = parseTagsInput(args[tagsIndex + 1]);
+
+                output(await CalDAV.createTask(title, calendar, options));
 
              } else if (subCommand === 'edit') {
                 const uidIndex = args.indexOf('--uid');
@@ -2214,6 +2350,31 @@ async function main() {
                     args, '--description', '--description-file'
                 );
                 if (description !== undefined) updates.description = description;
+
+                const startIndex = args.indexOf('--start');
+                if (startIndex !== -1) updates.startDate = args[startIndex + 1];
+
+                const locIndex = args.indexOf('--location');
+                if (locIndex !== -1) updates.location = args[locIndex + 1];
+
+                const urlIndex = args.indexOf('--url');
+                if (urlIndex !== -1) updates.url = args[urlIndex + 1];
+
+                const classIndex = args.indexOf('--class');
+                if (classIndex !== -1) updates.className = parseClassInput(args[classIndex + 1]);
+
+                const tagsIndex = args.indexOf('--tags');
+                if (tagsIndex !== -1) updates.tags = parseTagsInput(args[tagsIndex + 1]);
+
+                const statusIndex = args.indexOf('--status');
+                if (statusIndex !== -1) {
+                    updates.status = parseStatusInput(args[statusIndex + 1]);
+                }
+
+                const percentIndex = args.indexOf('--percent-complete');
+                if (percentIndex !== -1) {
+                    updates.percentComplete = parsePercentCompleteInput(args[percentIndex + 1]);
+                }
 
                 output(await CalDAV.updateTask(uid, calendar, updates));
 

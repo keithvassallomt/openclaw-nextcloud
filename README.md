@@ -312,8 +312,14 @@ CalDAV form (`20260205T100000Z`).
 # List all tasks
 node scripts/nextcloud.js tasks list
 
-# Create a task
-node scripts/nextcloud.js tasks create --title "Buy groceries" --due "2026-02-05T17:00:00Z" --priority 1
+# Create a task with all optional metadata
+node scripts/nextcloud.js tasks create --title "Buy groceries" \
+  --due "2026-02-05T17:00:00Z" --priority 1 \
+  --start "2026-02-04T09:00:00Z" --location "Supermarket" \
+  --url "https://example.com" --class PRIVATE --tags "errands,shopping"
+
+# Update a task, including status and percent-complete
+node scripts/nextcloud.js tasks edit --uid task-uid --status IN-PROCESS --percent-complete 50
 
 # Complete a task
 node scripts/nextcloud.js tasks complete --uid task-uid

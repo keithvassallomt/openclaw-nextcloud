@@ -82,6 +82,7 @@ UID:task-1
 SUMMARY:Call Alice\\, Bob
 DESCRIPTION:First line\\nSecond line
 STATUS:NEEDS-ACTION
+DUE:20260730T120000Z
 PRIORITY:5
 END:VTODO
 END:VCALENDAR</cal:calendar-data>
@@ -506,6 +507,141 @@ for (const [subcommand, args] of [
       requests.length === before,
     { result }
   );
+}
+
+// New task metadata options: status and percent-complete.
+before = requests.length;
+result = await run([
+  'tasks', 'edit',
+  '--uid', 'task-1',
+  '--status', 'IN-PROCESS',
+  '--percent-complete', '42'
+]);
+const metadataPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'tasks edit writes STATUS and PERCENT-COMPLETE',
+  result.code === 0 &&
+    metadataPut?.body.includes('STATUS:IN-PROCESS') &&
+    metadataPut?.body.includes('PERCENT-COMPLETE:42'),
+  { body: metadataPut?.body ?? null, result }
+);
+
+for (const [flag, value, expectedMsg] of [
+  ['--status', 'INVALID', "Invalid status 'INVALID'"],
+  ['--percent-complete', '101', 'Percent-complete must be between 0 and 100'],
+  ['--percent-complete', 'abc', 'Percent-complete must be an integer']
+]) {
+  before = requests.length;
+  result = await run(['tasks', 'edit', '--uid', 'task-1', flag, value]);
+  record(
+    `tasks edit rejects ${flag}=${value} before a request`,
+    result.code !== 0 &&
+      result.stderr.includes(expectedMsg) &&
+      requests.length === before,
+    { result }
+  );
+}
+
+// Extended task metadata: start, location, url, class, tags.
+before = requests.length;
+result = await run([
+  'tasks', 'create',
+  '--title', 'Full metadata task',
+  '--start', '2026-09-01T10:00:00Z',
+  '--due', '2026-09-02T10:00:00Z',
+  '--priority', '5',
+  '--location', 'Home office',
+  '--url', 'https://example.com',
+  '--class', 'PRIVATE',
+  '--tags', 'work,urgent'
+]);
+const createMetadataPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'tasks create writes start, location, url, class, and tags',
+  result.code === 0 &&
+    createMetadataPut?.body.includes('DTSTART:20260901') &&
+    createMetadataPut?.body.includes('DUE:20260902') &&
+    createMetadataPut?.body.includes('PRIORITY:5') &&
+    createMetadataPut?.body.includes('LOCATION:Home office') &&
+    createMetadataPut?.body.includes('URL:https://example.com') &&
+    createMetadataPut?.body.includes('CLASS:PRIVATE') &&
+    createMetadataPut?.body.includes('CATEGORIES:work,urgent'),
+  { body: createMetadataPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run([
+  'tasks', 'edit',
+  '--uid', 'task-1',
+  '--start', '2026-07-01T10:00:00Z',
+  '--location', 'Updated office',
+  '--url', 'https://updated.example.com',
+  '--class', 'CONFIDENTIAL',
+  '--tags', 'review,later'
+]);
+const editMetadataPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'tasks edit writes start, location, url, class, and tags',
+  result.code === 0 &&
+    editMetadataPut?.body.includes('DTSTART:20260701') &&
+    editMetadataPut?.body.includes('LOCATION:Updated office') &&
+    editMetadataPut?.body.includes('URL:https://updated.example.com') &&
+    editMetadataPut?.body.includes('CLASS:CONFIDENTIAL') &&
+    editMetadataPut?.body.includes('CATEGORIES:review,later'),
+  { body: editMetadataPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run([
+  'tasks', 'create',
+  '--title', 'Inverted dates',
+  '--start', '2026-09-02T10:00:00Z',
+  '--due', '2026-09-01T10:00:00Z'
+]);
+record(
+  'tasks create rejects start date after due date before a request',
+  result.code !== 0 &&
+    result.stderr.includes('Start date must be earlier than or equal to due date') &&
+    requests.length === before,
+  { result }
+);
+
+before = requests.length;
+result = await run([
+  'tasks', 'edit',
+  '--uid', 'task-1',
+  '--start', '2099-01-01T00:00:00Z'
+]);
+const editValidationPuts = requests.slice(before).filter(entry => entry.method === 'PUT');
+record(
+  'tasks edit rejects start date after existing due date before a PUT',
+  result.code !== 0 &&
+    result.stderr.includes('Start date must be earlier than or equal to due date') &&
+    editValidationPuts.length === 0,
+  { result }
+);
+
+for (const [flag, value, expectedMsg] of [
+  ['--class', 'SECRET', "Invalid class 'SECRET'"],
+  ['--class', 'public', ''] // valid, lowercase should normalize
+]) {
+  before = requests.length;
+  result = await run(['tasks', 'edit', '--uid', 'task-1', flag, value]);
+  if (expectedMsg === '') {
+    record(
+      'tasks edit accepts lowercase class values',
+      result.code === 0,
+      { result }
+    );
+  } else {
+    record(
+      `tasks edit rejects ${flag}=${value} before a request`,
+      result.code !== 0 &&
+        result.stderr.includes(expectedMsg) &&
+        requests.length === before,
+      { result }
+    );
+  }
 }
 } finally {
   await new Promise(resolveClose => server.close(resolveClose));
