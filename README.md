@@ -151,7 +151,13 @@ variables:
 NEXTCLOUD_URL=https://your-nextcloud-instance.com
 NEXTCLOUD_USER=your_username
 NEXTCLOUD_TOKEN=your_app_password
+NEXTCLOUD_EMAIL=you@example.com   # optional, see below
 ```
+
+`NEXTCLOUD_EMAIL` is optional. When set, `calendar create` marks the account as
+the event's organiser and as an attendee who has already accepted, so clients
+show the event as confirmed rather than as an invitation awaiting a reply. Left
+unset, events are written exactly as they were before the option existed.
 
 **Generating an App Password:**
 1. Log into your Nextcloud instance
@@ -439,7 +445,7 @@ This skill executes a bundled JavaScript file (`scripts/nextcloud.js`) on your m
 **What it can access**
 
 - The Nextcloud instance at `NEXTCLOUD_URL` — no other endpoints. There is no telemetry, no analytics, no auto-update, no third-party calls. You can confirm this by `grep -E 'fetch\(|http[s]?://' scripts/nextcloud.js`; every URL is built from `CONFIG.url` (i.e. `NEXTCLOUD_URL`) or relative API paths.
-- The environment variables `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_TOKEN`. No other env vars are read.
+- The environment variables `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_TOKEN`, and two optional ones: `NEXTCLOUD_EMAIL` (an address written into events you create, see [Configuration](#configuration)) and `OPENCLAW_ALLOW_HTTP` (the plaintext-HTTP opt-out). No other env vars are read; `grep -o 'process\.env\.[A-Z_]*' index.js` lists them.
 - No filesystem access beyond the Node module loader and the standard `fs` for reading inputs you pass it.
 
 **Credentials**

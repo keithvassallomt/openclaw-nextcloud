@@ -31,7 +31,10 @@ import crypto from 'node:crypto';
 const CONFIG = {
     url: process.env.NEXTCLOUD_URL,
     user: process.env.NEXTCLOUD_USER,
-    token: process.env.NEXTCLOUD_TOKEN
+    token: process.env.NEXTCLOUD_TOKEN,
+    // Optional. When set, created events name the account as a confirmed
+    // organiser and attendee; when unset, events are written exactly as before.
+    email: process.env.NEXTCLOUD_EMAIL || null
 };
 
 if (!CONFIG.url || !CONFIG.user || !CONFIG.token) {
@@ -175,6 +178,31 @@ function escapePropertyValue(value) {
     // Escape semicolons and commas which delimit structured values
     escaped = escaped.replace(/;/g, '\\;').replace(/,/g, '\\,');
     return escaped;
+}
+
+// RFC 5545 3.1: a parameter value is paramtext or a quoted-string, and neither
+// defines a backslash escape. escapePropertyValue() is the wrong tool here - it
+// would emit CN=Doe\, John, which a strict parser reads as two parameter
+// values. Quote when the value needs it, and drop what a quoted-string has no
+// way to represent.
+function escapeParameterValue(value) {
+    const cleaned = String(value)
+        .replace(/[\u0000-\u001F\u007F]+/g, ' ')
+        .replace(/"/g, "'");
+    return /[,;:]/.test(cleaned) ? `"${cleaned}"` : cleaned;
+}
+
+// NEXTCLOUD_EMAIL is interpolated into a mailto: URI on the ORGANIZER and
+// ATTENDEE lines, where a newline or a structural character would break out of
+// the property and inject one of its own. Reject rather than rewrite: an
+// address containing those is a misconfiguration, and quietly altering someone's
+// identity is worse than telling them it is wrong.
+function parseOrganizerEmail(value) {
+    const email = String(value).trim();
+    if (!/^[^\s@,;:"<>\\]+@[^\s@,;:"<>\\]+\.[^\s@,;:"<>\\]+$/.test(email)) {
+        throw new Error('NEXTCLOUD_EMAIL must be a plain email address, e.g. user@example.com.');
+    }
+    return email;
 }
 
 // Decode one layer of RFC 5545 / RFC 6350 text escaping when returning
@@ -1015,6 +1043,10 @@ const CalDAV = {
     // --- Calendar Events ---
 
     async createEvent(summary, start, end, calendarName, description, location) {
+        // Resolved before any network call so a malformed NEXTCLOUD_EMAIL is
+        // reported immediately rather than after calendar discovery has run.
+        const organizerEmail = CONFIG.email ? parseOrganizerEmail(CONFIG.email) : null;
+
         const cal = await this.getCalendar(calendarName, 'VEVENT');
         const uid = crypto.randomUUID();
         const now = new Date();
@@ -1029,6 +1061,18 @@ const CalDAV = {
 
         if (description) vevent += `DESCRIPTION:${escapePropertyValue(description)}\n`;
         if (location) vevent += `LOCATION:${escapePropertyValue(location)}\n`;
+
+        // With an address configured, name the account as the organiser and as
+        // an already-accepted attendee, so clients show the event as confirmed
+        // instead of as an invitation awaiting a reply. RSVP is deliberately
+        // omitted: asking for a response that PARTSTAT has already given is
+        // what produces the pending prompt this is meant to avoid.
+        if (organizerEmail) {
+            const cn = escapeParameterValue(CONFIG.user || organizerEmail.split('@')[0]);
+            vevent += `STATUS:CONFIRMED\n`;
+            vevent += `ORGANIZER;CN=${cn}:mailto:${organizerEmail}\n`;
+            vevent += `ATTENDEE;CN=${cn};ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:${organizerEmail}\n`;
+        }
 
         vevent += `END:VEVENT\nEND:VCALENDAR`;
 

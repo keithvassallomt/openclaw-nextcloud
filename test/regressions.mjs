@@ -149,7 +149,7 @@ const server = http.createServer(async (req, res) => {
 
   res.statusCode = 200;
   if (req.method === 'PROPFIND' &&
-      req.url === '/remote.php/dav/calendars/tester/') {
+      /^\/remote\.php\/dav\/calendars\/[^/]+\/$/.test(req.url ?? '')) {
     res.setHeader('content-type', 'application/xml');
     res.end(calendarDiscovery);
   } else if (req.method === 'PROPFIND' &&
@@ -178,10 +178,15 @@ const env = {
   NEXTCLOUD_USER: 'tester',
   NEXTCLOUD_TOKEN: 'dummy-test-token'
 };
+// Optional, and read from the ambient environment — drop it so a developer who
+// has it set does not get different results from CI.
+delete env.NEXTCLOUD_EMAIL;
 
-function run(args) {
+function run(args, extraEnv = {}) {
   return new Promise(resolveRun => {
-    const child = spawn(process.execPath, [bundle, ...args], { env });
+    const child = spawn(process.execPath, [bundle, ...args], {
+      env: { ...env, ...extraEnv }
+    });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', chunk => stdout += chunk);
@@ -291,6 +296,84 @@ record(
     listedEvent?.description === 'Line one\nLine two' &&
     listedEvent?.location === 'Room; 2',
   { listedEvent, result }
+);
+
+// NEXTCLOUD_EMAIL is optional: unset, events must be written exactly as they
+// were before it existed.
+before = requests.length;
+result = await run([
+  'calendar', 'create',
+  '--summary', 'Plain event',
+  '--start', '2026-09-01T10:00:00',
+  '--end', '2026-09-01T11:00:00',
+  '--calendar', 'Personal'
+]);
+const plainPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'events carry no organiser when NEXTCLOUD_EMAIL is unset',
+  result.code === 0 &&
+    !plainPut?.body.includes('ORGANIZER') &&
+    !plainPut?.body.includes('ATTENDEE') &&
+    !plainPut?.body.includes('STATUS:'),
+  { body: plainPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run([
+  'calendar', 'create',
+  '--summary', 'Confirmed event',
+  '--start', '2026-09-01T10:00:00',
+  '--end', '2026-09-01T11:00:00',
+  '--calendar', 'Personal'
+], { NEXTCLOUD_EMAIL: 'tester@example.com' });
+const organizerPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'NEXTCLOUD_EMAIL marks the account as a confirmed organiser and attendee',
+  result.code === 0 &&
+    organizerPut?.body.includes('STATUS:CONFIRMED') &&
+    organizerPut?.body.includes('ORGANIZER;CN=tester:mailto:tester@example.com') &&
+    organizerPut?.body.includes(
+      'ATTENDEE;CN=tester;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:tester@example.com'
+    ) &&
+    // RSVP would ask for a reply PARTSTAT has already given, reinstating the
+    // pending prompt this feature exists to avoid.
+    !organizerPut?.body.includes('RSVP'),
+  { body: organizerPut?.body ?? null, result }
+);
+
+// A parameter value is not a property value: RFC 5545 defines no backslash
+// escape for it, so a comma has to be handled by quoting the whole value.
+before = requests.length;
+result = await run([
+  'calendar', 'create',
+  '--summary', 'Quoted CN',
+  '--start', '2026-09-01T10:00:00',
+  '--end', '2026-09-01T11:00:00',
+  '--calendar', 'Personal'
+], { NEXTCLOUD_USER: 'Doe, John', NEXTCLOUD_EMAIL: 'j@example.com' });
+const quotedPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'a comma in the display name is quoted rather than backslash-escaped',
+  result.code === 0 &&
+    quotedPut?.body.includes('ORGANIZER;CN="Doe, John":mailto:j@example.com') &&
+    !quotedPut?.body.includes('CN=Doe\\,'),
+  { body: quotedPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run([
+  'calendar', 'create',
+  '--summary', 'Injection attempt',
+  '--start', '2026-09-01T10:00:00',
+  '--end', '2026-09-01T11:00:00',
+  '--calendar', 'Personal'
+], { NEXTCLOUD_EMAIL: 'a@x.com\nDESCRIPTION:injected' });
+record(
+  'a newline in NEXTCLOUD_EMAIL is rejected before any request',
+  result.code !== 0 &&
+    result.stderr.includes('NEXTCLOUD_EMAIL must be a plain email address') &&
+    requests.length === before,
+  { result }
 );
 
 result = await run(['tasks', 'list', '--calendar', 'Personal']);
