@@ -17724,6 +17724,8 @@ var CONFIG = {
   url: process.env.NEXTCLOUD_URL,
   user: process.env.NEXTCLOUD_USER,
   token: process.env.NEXTCLOUD_TOKEN,
+  // Optional. When set, created events name the account as a confirmed
+  // organiser and attendee; when unset, events are written exactly as before.
   email: process.env.NEXTCLOUD_EMAIL || null
 };
 if (!CONFIG.url || !CONFIG.user || !CONFIG.token) {
@@ -17833,6 +17835,17 @@ function escapePropertyValue(value) {
   escaped = escaped.replace(/\r\n/g, "\\n").replace(/\n/g, "\\n").replace(/\r/g, "\\n");
   escaped = escaped.replace(/;/g, "\\;").replace(/,/g, "\\,");
   return escaped;
+}
+function escapeParameterValue(value) {
+  const cleaned = String(value).replace(/[\u0000-\u001F\u007F]+/g, " ").replace(/"/g, "'");
+  return /[,;:]/.test(cleaned) ? `"${cleaned}"` : cleaned;
+}
+function parseOrganizerEmail(value) {
+  const email = String(value).trim();
+  if (!/^[^\s@,;:"<>\\]+@[^\s@,;:"<>\\]+\.[^\s@,;:"<>\\]+$/.test(email)) {
+    throw new Error("NEXTCLOUD_EMAIL must be a plain email address, e.g. user@example.com.");
+  }
+  return email;
 }
 function unescapePropertyValue(value) {
   if (value === null || value === void 0) return value;
@@ -18539,6 +18552,7 @@ END:VCALENDAR`;
   },
   // --- Calendar Events ---
   async createEvent(summary, start, end, calendarName, description, location) {
+    const organizerEmail = CONFIG.email ? parseOrganizerEmail(CONFIG.email) : null;
     const cal = await this.getCalendar(calendarName, "VEVENT");
     const uid = crypto.randomUUID();
     const now = /* @__PURE__ */ new Date();
@@ -18561,14 +18575,13 @@ DTEND:${toCalDavDate(end)}
 `;
     if (location) vevent += `LOCATION:${escapePropertyValue(location)}
 `;
-    if (CONFIG.email) {
-      const email = CONFIG.email;
-      const cn = CONFIG.user || email.split("@")[0];
+    if (organizerEmail) {
+      const cn = escapeParameterValue(CONFIG.user || organizerEmail.split("@")[0]);
       vevent += `STATUS:CONFIRMED
 `;
-      vevent += `ORGANIZER;CN=${escapePropertyValue(cn)}:mailto:${email}
+      vevent += `ORGANIZER;CN=${cn}:mailto:${organizerEmail}
 `;
-      vevent += `ATTENDEE;CN=${escapePropertyValue(cn)};ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:${email}
+      vevent += `ATTENDEE;CN=${cn};ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:${organizerEmail}
 `;
     }
     vevent += `END:VEVENT
