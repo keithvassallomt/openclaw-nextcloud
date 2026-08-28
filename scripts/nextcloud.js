@@ -3614,15 +3614,15 @@ var require_protectedTokens = __commonJS({
     function isProtectedWeekYearToken(token) {
       return protectedWeekYearTokens.indexOf(token) !== -1;
     }
-    function throwProtectedError(token, format2, input) {
+    function throwProtectedError(token, format, input) {
       if (token === "YYYY") {
-        throw new RangeError("Use `yyyy` instead of `YYYY` (in `".concat(format2, "`) for formatting years to the input `").concat(input, "`; see: https://github.com/date-fns/date-fns/blob/master/docs/unicodeTokens.md"));
+        throw new RangeError("Use `yyyy` instead of `YYYY` (in `".concat(format, "`) for formatting years to the input `").concat(input, "`; see: https://github.com/date-fns/date-fns/blob/master/docs/unicodeTokens.md"));
       } else if (token === "YY") {
-        throw new RangeError("Use `yy` instead of `YY` (in `".concat(format2, "`) for formatting years to the input `").concat(input, "`; see: https://github.com/date-fns/date-fns/blob/master/docs/unicodeTokens.md"));
+        throw new RangeError("Use `yy` instead of `YY` (in `".concat(format, "`) for formatting years to the input `").concat(input, "`; see: https://github.com/date-fns/date-fns/blob/master/docs/unicodeTokens.md"));
       } else if (token === "D") {
-        throw new RangeError("Use `d` instead of `D` (in `".concat(format2, "`) for formatting days of the month to the input `").concat(input, "`; see: https://github.com/date-fns/date-fns/blob/master/docs/unicodeTokens.md"));
+        throw new RangeError("Use `d` instead of `D` (in `".concat(format, "`) for formatting days of the month to the input `").concat(input, "`; see: https://github.com/date-fns/date-fns/blob/master/docs/unicodeTokens.md"));
       } else if (token === "DD") {
-        throw new RangeError("Use `dd` instead of `DD` (in `".concat(format2, "`) for formatting days of the month to the input `").concat(input, "`; see: https://github.com/date-fns/date-fns/blob/master/docs/unicodeTokens.md"));
+        throw new RangeError("Use `dd` instead of `DD` (in `".concat(format, "`) for formatting days of the month to the input `").concat(input, "`; see: https://github.com/date-fns/date-fns/blob/master/docs/unicodeTokens.md"));
       }
     }
   }
@@ -3736,8 +3736,8 @@ var require_buildFormatLongFn = __commonJS({
       return function() {
         var options = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : {};
         var width = options.width ? String(options.width) : args.defaultWidth;
-        var format2 = args.formats[width] || args.formats[args.defaultWidth];
-        return format2;
+        var format = args.formats[width] || args.formats[args.defaultWidth];
+        return format;
       };
     }
     module.exports = exports2.default;
@@ -4241,7 +4241,7 @@ var require_format = __commonJS({
     Object.defineProperty(exports2, "__esModule", {
       value: true
     });
-    exports2.default = format2;
+    exports2.default = format;
     var _index = _interopRequireDefault(require_isValid());
     var _index2 = _interopRequireDefault(require_subMilliseconds());
     var _index3 = _interopRequireDefault(require_toDate());
@@ -4258,7 +4258,7 @@ var require_format = __commonJS({
     var escapedStringRegExp = /^'([^]*?)'?$/;
     var doubleQuoteRegExp = /''/g;
     var unescapedLatinCharacterRegExp = /[a-zA-Z]/;
-    function format2(dirtyDate, dirtyFormatStr, options) {
+    function format(dirtyDate, dirtyFormatStr, options) {
       var _ref, _options$locale, _ref2, _ref3, _ref4, _options$firstWeekCon, _options$locale2, _options$locale2$opti, _defaultOptions$local, _defaultOptions$local2, _ref5, _ref6, _ref7, _options$weekStartsOn, _options$locale3, _options$locale3$opti, _defaultOptions$local3, _defaultOptions$local4;
       (0, _index9.default)(2, arguments);
       var formatStr = String(dirtyFormatStr);
@@ -4646,13 +4646,13 @@ var require_formatDuration = __commonJS({
       }
       var defaultOptions3 = (0, _index.getDefaultOptions)();
       var locale = (_ref = (_options$locale = options === null || options === void 0 ? void 0 : options.locale) !== null && _options$locale !== void 0 ? _options$locale : defaultOptions3.locale) !== null && _ref !== void 0 ? _ref : _index2.default;
-      var format2 = (_options$format = options === null || options === void 0 ? void 0 : options.format) !== null && _options$format !== void 0 ? _options$format : defaultFormat;
+      var format = (_options$format = options === null || options === void 0 ? void 0 : options.format) !== null && _options$format !== void 0 ? _options$format : defaultFormat;
       var zero = (_options$zero = options === null || options === void 0 ? void 0 : options.zero) !== null && _options$zero !== void 0 ? _options$zero : false;
       var delimiter = (_options$delimiter = options === null || options === void 0 ? void 0 : options.delimiter) !== null && _options$delimiter !== void 0 ? _options$delimiter : " ";
       if (!locale.formatDistance) {
         return "";
       }
-      var result = format2.reduce(function(acc, unit) {
+      var result = format.reduce(function(acc, unit) {
         var token = "x".concat(unit.replace(/(^.)/, function(m) {
           return m.toUpperCase();
         }));
@@ -4687,9 +4687,9 @@ var require_formatISO = __commonJS({
       if (isNaN(originalDate.getTime())) {
         throw new RangeError("Invalid time value");
       }
-      var format2 = String((_options$format = options === null || options === void 0 ? void 0 : options.format) !== null && _options$format !== void 0 ? _options$format : "extended");
+      var format = String((_options$format = options === null || options === void 0 ? void 0 : options.format) !== null && _options$format !== void 0 ? _options$format : "extended");
       var representation = String((_options$representati = options === null || options === void 0 ? void 0 : options.representation) !== null && _options$representati !== void 0 ? _options$representati : "complete");
-      if (format2 !== "extended" && format2 !== "basic") {
+      if (format !== "extended" && format !== "basic") {
         throw new RangeError("format must be 'extended' or 'basic'");
       }
       if (representation !== "date" && representation !== "time" && representation !== "complete") {
@@ -4697,8 +4697,8 @@ var require_formatISO = __commonJS({
       }
       var result = "";
       var tzOffset = "";
-      var dateDelimiter = format2 === "extended" ? "-" : "";
-      var timeDelimiter = format2 === "extended" ? ":" : "";
+      var dateDelimiter = format === "extended" ? "-" : "";
+      var timeDelimiter = format === "extended" ? ":" : "";
       if (representation !== "time") {
         var day = (0, _index2.default)(originalDate.getDate(), 2);
         var month = (0, _index2.default)(originalDate.getMonth() + 1, 2);
@@ -4750,17 +4750,17 @@ var require_formatISO9075 = __commonJS({
       if (!(0, _index2.default)(originalDate)) {
         throw new RangeError("Invalid time value");
       }
-      var format2 = String((_options$format = options === null || options === void 0 ? void 0 : options.format) !== null && _options$format !== void 0 ? _options$format : "extended");
+      var format = String((_options$format = options === null || options === void 0 ? void 0 : options.format) !== null && _options$format !== void 0 ? _options$format : "extended");
       var representation = String((_options$representati = options === null || options === void 0 ? void 0 : options.representation) !== null && _options$representati !== void 0 ? _options$representati : "complete");
-      if (format2 !== "extended" && format2 !== "basic") {
+      if (format !== "extended" && format !== "basic") {
         throw new RangeError("format must be 'extended' or 'basic'");
       }
       if (representation !== "date" && representation !== "time" && representation !== "complete") {
         throw new RangeError("representation must be 'date', 'time', or 'complete'");
       }
       var result = "";
-      var dateDelimiter = format2 === "extended" ? "-" : "";
-      var timeDelimiter = format2 === "extended" ? ":" : "";
+      var dateDelimiter = format === "extended" ? "-" : "";
+      var timeDelimiter = format === "extended" ? ":" : "";
       if (representation !== "time") {
         var day = (0, _index3.default)(originalDate.getDate(), 2);
         var month = (0, _index3.default)(originalDate.getMonth() + 1, 2);
@@ -17904,6 +17904,13 @@ function parseClassInput(value) {
   }
   return normalized;
 }
+function parseUriInput(value) {
+  const uri = String(value).trim();
+  if (/[\u0000-\u001F\u007F]/.test(uri) || /\s/.test(uri)) {
+    throw new Error("URL must be a single URI with no spaces or line breaks.");
+  }
+  return uri;
+}
 function parseTagsInput(value) {
   if (typeof value !== "string" || value.trim() === "") {
     return [];
@@ -18024,8 +18031,40 @@ function parseDateInput(str) {
 function toCalDavDate(date) {
   return date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
 }
-function validateTaskDates(startDate, dueDate) {
-  if (startDate && dueDate && startDate.getTime() > dueDate.getTime()) {
+function parseCalendarValue(str) {
+  const raw = String(str).trim();
+  const dateOnly = /^(\d{4})-?(\d{2})-?(\d{2})$/.exec(raw);
+  if (dateOnly) {
+    const [, y, mo, d] = dateOnly;
+    const date2 = /* @__PURE__ */ new Date(`${y}-${mo}-${d}T00:00:00Z`);
+    if (isNaN(date2.getTime())) {
+      throw new Error(`Invalid date '${str}'. Use ISO 8601 (2026-04-15) or CalDAV compact format (20260415).`);
+    }
+    return { date: date2, isDate: true, ical: `${y}${mo}${d}` };
+  }
+  const date = parseDateInput(raw);
+  return { date, isDate: false, ical: toCalDavDate(date) };
+}
+function readCalendarValue(text, prop) {
+  const match = text.match(new RegExp(`^${prop}(;[^:\r
+]*)?:(.*)$`, "m"));
+  if (!match) return null;
+  try {
+    const value = parseCalendarValue(match[2].trim());
+    const declaredDate = /(?:^|;)VALUE=DATE(?:;|$)/i.test(match[1] || "");
+    return declaredDate ? { ...value, isDate: true } : value;
+  } catch {
+    return null;
+  }
+}
+function validateTaskDates(start, due) {
+  if (!start || !due) return;
+  if (start.isDate !== due.isDate) {
+    throw new Error(
+      "A task's start and due dates must both be all-day dates (2026-04-15) or both carry a time (2026-04-15T17:00:00Z). Set --start and --due together to change which form the task uses."
+    );
+  }
+  if (start.date.getTime() > due.date.getTime()) {
     throw new Error("Start date must be earlier than or equal to due date.");
   }
 }
@@ -18300,12 +18339,8 @@ var CalDAV = {
   async getEvents(start, end) {
     const calendars = await this.findCalendars("VEVENT");
     const allEvents = [];
-    const toCalDavDate2 = (dateStr) => {
-      const d = parseDateInput(dateStr);
-      return d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
-    };
-    const startStr = toCalDavDate2(start);
-    const endStr = toCalDavDate2(end);
+    const startStr = toCalDavDate(parseDateInput(start));
+    const endStr = toCalDavDate(parseDateInput(end));
     const body = `
             <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
                 <d:prop>
@@ -18396,18 +18431,19 @@ var CalDAV = {
             continue;
           }
           const calData = propstats[0]["d:prop"]["cal:calendar-data"];
-          const unfolded = calData.replace(/\r?\n[ \t]/g, "");
-          const summaryMatch = calData.match(/SUMMARY:(.*)/);
-          const descriptionMatch = unfolded.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
-          const statusMatch = unfolded.match(/^STATUS(?:;[^:]*)?:(.*)$/m);
-          const uidMatch = calData.match(/UID:(.*)/);
-          const startMatch = calData.match(/DTSTART(?:;.*)?:(.*)/);
-          const dueMatch = calData.match(/DUE(?:;.*)?:(.*)/);
-          const priorityMatch = calData.match(/PRIORITY:(.*)/);
-          const locationMatch = unfolded.match(/^LOCATION(?:;[^:]*)?:(.*)$/m);
-          const urlMatch = unfolded.match(/^URL(?:;[^:]*)?:(.*)$/m);
-          const classMatch = unfolded.match(/^CLASS(?:;[^:]*)?:(.*)$/m);
-          const categoriesMatch = unfolded.match(/^CATEGORIES(?:;[^:]*)?:(.*)$/m);
+          const vtodo = this._componentText(calData);
+          if (!vtodo) continue;
+          const summaryMatch = vtodo.match(/^SUMMARY(?:;[^:]*)?:(.*)$/m);
+          const descriptionMatch = vtodo.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
+          const statusMatch = vtodo.match(/^STATUS(?:;[^:]*)?:(.*)$/m);
+          const uidMatch = vtodo.match(/^UID(?:;[^:]*)?:(.*)$/m);
+          const startMatch = vtodo.match(/^DTSTART(?:;[^:]*)?:(.*)$/m);
+          const dueMatch = vtodo.match(/^DUE(?:;[^:]*)?:(.*)$/m);
+          const priorityMatch = vtodo.match(/^PRIORITY(?:;[^:]*)?:(.*)$/m);
+          const locationMatch = vtodo.match(/^LOCATION(?:;[^:]*)?:(.*)$/m);
+          const urlMatch = vtodo.match(/^URL(?:;[^:]*)?:(.*)$/m);
+          const classMatch = vtodo.match(/^CLASS(?:;[^:]*)?:(.*)$/m);
+          const categoriesMatch = vtodo.match(/^CATEGORIES(?:;[^:]*)?:(.*)$/m);
           const status = statusMatch ? statusMatch[1].trim() : "NEEDS-ACTION";
           if (status === "COMPLETED") continue;
           let tags = null;
@@ -18518,25 +18554,62 @@ var CalDAV = {
     }
     return null;
   },
-  _updateProperty(vcal, prop, value) {
-    if (value === null || value === void 0) {
-      return vcal;
+  // Index the lines belonging to the VTODO or VEVENT itself. Properties must
+  // never be read from or written to anything else in the VCALENDAR: a
+  // VTIMEZONE carries DTSTART lines of its own (the DST rules, dated 1970),
+  // and a VALARM carries its own SUMMARY and DESCRIPTION. An unscoped match
+  // finds whichever comes first in the file.
+  _componentLines(lines) {
+    let name = null;
+    let nested = 0;
+    const own = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!name) {
+        const begin = /^BEGIN:(VTODO|VEVENT)\s*$/.exec(line);
+        if (begin) name = begin[1];
+        continue;
+      }
+      if (nested === 0 && new RegExp(`^END:${name}\\s*$`).test(line)) {
+        return { name, own, end: i };
+      }
+      if (/^BEGIN:/.test(line)) nested++;
+      else if (/^END:/.test(line)) nested--;
+      else if (nested === 0) own.push(i);
     }
-    const regex = new RegExp(`^${prop}(?:;[^:\\r\\n]*)?:.*$`, "m");
-    const newLine = `${prop}:${value}`;
-    if (regex.test(vcal)) {
-      return vcal.replace(regex, () => newLine);
-    }
-    const endMatch = vcal.match(/END:(VTODO|VEVENT)/);
-    if (!endMatch) {
+    return null;
+  },
+  // The component's own property lines, unfolded, for reading values out of.
+  _componentText(vcal) {
+    const lines = vcal.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
+    const component = this._componentLines(lines);
+    return component ? component.own.map((i) => lines[i]).join("\n") : "";
+  },
+  // Replace, insert, or (value === null) remove a property on the component.
+  _updateProperty(vcal, prop, value, params = null) {
+    if (value === void 0) return vcal;
+    const lines = vcal.split(/\r?\n/);
+    const component = this._componentLines(lines);
+    if (!component) {
       throw new Error("Cannot insert property: no END:VTODO or END:VEVENT found in calendar data.");
     }
-    return vcal.replace(endMatch[0], () => `${newLine}
-${endMatch[0]}`);
+    const eol = vcal.includes("\r\n") ? "\r\n" : "\n";
+    const newLine = value === null ? null : `${prop}${params ? `;${params}` : ""}:${value}`;
+    const regex = new RegExp(`^${prop}(?:;[^:]*)?:`);
+    const first = component.own.find((i) => regex.test(lines[i]));
+    if (first === void 0) {
+      if (newLine === null) return vcal;
+      lines.splice(component.end, 0, newLine);
+      return lines.join(eol);
+    }
+    let last = first;
+    while (last + 1 < lines.length && /^[ \t]/.test(lines[last + 1])) last++;
+    lines.splice(first, last - first + 1, ...newLine === null ? [] : [newLine]);
+    return lines.join(eol);
   },
   async createTask(title, calendarName, options = {}) {
-    const start = options.startDate ? parseDateInput(options.startDate) : null;
-    const due = options.dueDate ? parseDateInput(options.dueDate) : null;
+    const start = options.startDate ? parseCalendarValue(options.startDate) : null;
+    const due = options.dueDate ? parseCalendarValue(options.dueDate) : null;
     validateTaskDates(start, due);
     const cal = await this.getCalendar(calendarName, "VTODO");
     const uid = crypto.randomUUID();
@@ -18551,9 +18624,9 @@ DTSTAMP:${dtstamp}
 SUMMARY:${escapePropertyValue(title)}
 STATUS:NEEDS-ACTION
 `;
-    if (start) vtodo += `DTSTART:${toCalDavDate(start)}
+    if (start) vtodo += `DTSTART${start.isDate ? ";VALUE=DATE" : ""}:${start.ical}
 `;
-    if (due) vtodo += `DUE:${toCalDavDate(due)}
+    if (due) vtodo += `DUE${due.isDate ? ";VALUE=DATE" : ""}:${due.ical}
 `;
     if (options.priority) vtodo += `PRIORITY:${options.priority}
 `;
@@ -18561,7 +18634,7 @@ STATUS:NEEDS-ACTION
 `;
     if (options.location) vtodo += `LOCATION:${escapePropertyValue(options.location)}
 `;
-    if (options.url) vtodo += `URL:${escapePropertyValue(options.url)}
+    if (options.url) vtodo += `URL:${options.url}
 `;
     if (options.className) vtodo += `CLASS:${options.className}
 `;
@@ -18592,31 +18665,31 @@ END:VCALENDAR`;
     if (updates.priority) vtodo = this._updateProperty(vtodo, "PRIORITY", updates.priority);
     if (updates.description) vtodo = this._updateProperty(vtodo, "DESCRIPTION", escapePropertyValue(updates.description));
     if (updates.startDate || updates.dueDate) {
-      const start = updates.startDate ? parseDateInput(updates.startDate) : null;
-      const due = updates.dueDate ? parseDateInput(updates.dueDate) : null;
-      const existingStartMatch = vtodo.match(/DTSTART(?:;.*)?:(.*)/);
-      const existingDueMatch = vtodo.match(/DUE(?:;.*)?:(.*)/);
-      const existingStart = existingStartMatch ? parseDateInput(existingStartMatch[1].trim()) : null;
-      const existingDue = existingDueMatch ? parseDateInput(existingDueMatch[1].trim()) : null;
-      validateTaskDates(start || existingStart, due || existingDue);
-      if (start) vtodo = this._updateProperty(vtodo, "DTSTART", toCalDavDate(start));
-      if (due) vtodo = this._updateProperty(vtodo, "DUE", toCalDavDate(due));
+      const start = updates.startDate ? parseCalendarValue(updates.startDate) : null;
+      const due = updates.dueDate ? parseCalendarValue(updates.dueDate) : null;
+      const stored = this._componentText(vtodo);
+      validateTaskDates(
+        start || readCalendarValue(stored, "DTSTART"),
+        due || readCalendarValue(stored, "DUE")
+      );
+      if (start) vtodo = this._updateProperty(vtodo, "DTSTART", start.ical, start.isDate ? "VALUE=DATE" : null);
+      if (due) vtodo = this._updateProperty(vtodo, "DUE", due.ical, due.isDate ? "VALUE=DATE" : null);
     }
     if (updates.location !== void 0) {
       vtodo = this._updateProperty(vtodo, "LOCATION", updates.location === null ? null : escapePropertyValue(updates.location));
     }
     if (updates.url !== void 0) {
-      vtodo = this._updateProperty(vtodo, "URL", updates.url === null ? null : escapePropertyValue(updates.url));
+      vtodo = this._updateProperty(vtodo, "URL", updates.url);
     }
     if (updates.className !== void 0) {
       vtodo = this._updateProperty(vtodo, "CLASS", updates.className);
     }
     if (updates.tags !== void 0) {
-      if (updates.tags === null || updates.tags.length === 0) {
-        vtodo = this._updateProperty(vtodo, "CATEGORIES", null);
-      } else {
-        vtodo = this._updateProperty(vtodo, "CATEGORIES", updates.tags.map(escapePropertyValue).join(","));
-      }
+      vtodo = this._updateProperty(
+        vtodo,
+        "CATEGORIES",
+        updates.tags === null || updates.tags.length === 0 ? null : updates.tags.map(escapePropertyValue).join(",")
+      );
     }
     if (updates.status) vtodo = this._updateProperty(vtodo, "STATUS", updates.status);
     if (updates.percentComplete !== void 0) vtodo = this._updateProperty(vtodo, "PERCENT-COMPLETE", updates.percentComplete);
@@ -18643,7 +18716,7 @@ END:VCALENDAR`;
     if (!task) throw new Error(`Task ${uid} not found.`);
     let vtodo = task.data;
     const now = /* @__PURE__ */ new Date();
-    const completedDate = (0, import_date_fns.format)(now, "yyyyMMdd'T'HHmmss'Z'");
+    const completedDate = toCalDavDate(now);
     vtodo = this._updateProperty(vtodo, "STATUS", "COMPLETED");
     vtodo = this._updateProperty(vtodo, "COMPLETED", completedDate);
     vtodo = this._updateProperty(vtodo, "PERCENT-COMPLETE", "100");
@@ -18663,11 +18736,7 @@ END:VCALENDAR`;
     const cal = await this.getCalendar(calendarName, "VEVENT");
     const uid = crypto.randomUUID();
     const now = /* @__PURE__ */ new Date();
-    const dtstamp = (0, import_date_fns.format)(now, "yyyyMMdd'T'HHmmss'Z'");
-    const toCalDavDate2 = (dateStr) => {
-      const d = parseDateInput(dateStr);
-      return d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
-    };
+    const dtstamp = toCalDavDate(now);
     let vevent = `BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//OpenClaw//Nextcloud Skill//EN
@@ -18675,8 +18744,8 @@ BEGIN:VEVENT
 UID:${uid}
 DTSTAMP:${dtstamp}
 SUMMARY:${escapePropertyValue(summary)}
-DTSTART:${toCalDavDate2(start)}
-DTEND:${toCalDavDate2(end)}
+DTSTART:${toCalDavDate(parseDateInput(start))}
+DTEND:${toCalDavDate(parseDateInput(end))}
 `;
     if (description) vevent += `DESCRIPTION:${escapePropertyValue(description)}
 `;
@@ -18764,11 +18833,11 @@ END:VCALENDAR`;
     if (updates.summary) vevent = this._updateProperty(vevent, "SUMMARY", escapePropertyValue(updates.summary));
     if (updates.start) {
       const d = parseDateInput(updates.start);
-      vevent = this._updateProperty(vevent, "DTSTART", d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z");
+      vevent = this._updateProperty(vevent, "DTSTART", toCalDavDate(d));
     }
     if (updates.end) {
       const d = parseDateInput(updates.end);
-      vevent = this._updateProperty(vevent, "DTEND", d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z");
+      vevent = this._updateProperty(vevent, "DTEND", toCalDavDate(d));
     }
     if (updates.description !== void 0) {
       vevent = this._updateProperty(vevent, "DESCRIPTION", escapePropertyValue(updates.description));
@@ -19664,16 +19733,16 @@ async function main() {
           priority,
           description
         };
-        const startIndex = args.indexOf("--start");
-        if (startIndex !== -1) options.startDate = args[startIndex + 1];
-        const locIndex = args.indexOf("--location");
-        if (locIndex !== -1) options.location = args[locIndex + 1];
-        const urlIndex = args.indexOf("--url");
-        if (urlIndex !== -1) options.url = args[urlIndex + 1];
-        const classIndex = args.indexOf("--class");
-        if (classIndex !== -1) options.className = parseClassInput(args[classIndex + 1]);
-        const tagsIndex = args.indexOf("--tags");
-        if (tagsIndex !== -1) options.tags = parseTagsInput(args[tagsIndex + 1]);
+        const start = getOptionValue(args, "--start");
+        if (start) options.startDate = start;
+        const location = getOptionValue(args, "--location");
+        if (location) options.location = location;
+        const url = getOptionValue(args, "--url");
+        if (url) options.url = parseUriInput(url);
+        const className = getOptionValue(args, "--class");
+        if (className) options.className = parseClassInput(className);
+        const tags = getOptionValue(args, "--tags");
+        if (tags) options.tags = parseTagsInput(tags);
         output(await CalDAV.createTask(title, calendar, options));
       } else if (subCommand === "edit") {
         const uidIndex = args.indexOf("--uid");
@@ -19696,16 +19765,16 @@ async function main() {
           "--description-file"
         );
         if (description !== void 0) updates.description = description;
-        const startIndex = args.indexOf("--start");
-        if (startIndex !== -1) updates.startDate = args[startIndex + 1];
-        const locIndex = args.indexOf("--location");
-        if (locIndex !== -1) updates.location = args[locIndex + 1];
-        const urlIndex = args.indexOf("--url");
-        if (urlIndex !== -1) updates.url = args[urlIndex + 1];
-        const classIndex = args.indexOf("--class");
-        if (classIndex !== -1) updates.className = parseClassInput(args[classIndex + 1]);
-        const tagsIndex = args.indexOf("--tags");
-        if (tagsIndex !== -1) updates.tags = parseTagsInput(args[tagsIndex + 1]);
+        const start = getOptionValue(args, "--start");
+        if (start) updates.startDate = start;
+        const location = getOptionValue(args, "--location");
+        if (location !== void 0) updates.location = location === "" ? null : location;
+        const url = getOptionValue(args, "--url");
+        if (url !== void 0) updates.url = url === "" ? null : parseUriInput(url);
+        const className = getOptionValue(args, "--class");
+        if (className !== void 0) updates.className = className === "" ? null : parseClassInput(className);
+        const tags = getOptionValue(args, "--tags");
+        if (tags !== void 0) updates.tags = parseTagsInput(tags);
         const statusIndex = args.indexOf("--status");
         if (statusIndex !== -1) {
           updates.status = parseStatusInput(args[statusIndex + 1]);

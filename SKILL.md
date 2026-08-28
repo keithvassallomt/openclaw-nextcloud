@@ -181,6 +181,11 @@ password files.
 - `tasks delete --uid <u> [--calendar <c>] --confirm tasks:delete`
 - `tasks complete --uid <u> [--calendar <c>]`
 
+A date with no time of day (`2026-02-05`) makes an all-day task. A task's start
+and due dates must both be all-day or both carry a time, so pass `--start` and
+`--due` together to switch a task from one to the other. On `tasks edit`, an
+empty value (`--tags ""`) removes that property from the task.
+
 ### Calendar Events
 - `calendar list [--from <iso>] [--to <iso>]` (Defaults to next 7 days)
 - `calendar create --summary <s> --start <iso> --end <iso> [--calendar <c>] [--description <d> | --description-file <file>] [--location <l>]`
