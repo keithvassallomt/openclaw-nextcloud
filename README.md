@@ -304,7 +304,9 @@ node scripts/nextcloud.js calendar delete --uid event-uid \
 the URL slug, or the full collection URL — so all of `Personal`, `personal`,
 and `/remote.php/dav/calendars/<user>/personal/` resolve to the same calendar.
 Date inputs accept either ISO 8601 (`2026-02-05T10:00:00Z`) or the compact
-CalDAV form (`20260205T100000Z`).
+CalDAV form (`20260205T100000Z`). For tasks, a date with no time of day
+(`2026-02-05`) means all day; a task's `--start` and `--due` must both be
+all-day dates or both carry a time.
 
 ### Tasks
 
@@ -312,8 +314,17 @@ CalDAV form (`20260205T100000Z`).
 # List all tasks
 node scripts/nextcloud.js tasks list
 
-# Create a task
-node scripts/nextcloud.js tasks create --title "Buy groceries" --due "2026-02-05T17:00:00Z" --priority 1
+# Create a task with all optional metadata
+node scripts/nextcloud.js tasks create --title "Buy groceries" \
+  --due "2026-02-05T17:00:00Z" --priority 1 \
+  --start "2026-02-04T09:00:00Z" --location "Supermarket" \
+  --url "https://example.com" --class PRIVATE --tags "errands,shopping"
+
+# Update a task, including status and percent-complete
+node scripts/nextcloud.js tasks edit --uid task-uid --status IN-PROCESS --percent-complete 50
+
+# Clear a task's metadata by passing an empty value
+node scripts/nextcloud.js tasks edit --uid task-uid --tags "" --location "" --url ""
 
 # Complete a task
 node scripts/nextcloud.js tasks complete --uid task-uid

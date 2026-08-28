@@ -82,6 +82,7 @@ UID:task-1
 SUMMARY:Call Alice\\, Bob
 DESCRIPTION:First line\\nSecond line
 STATUS:NEEDS-ACTION
+DUE:20260730T120000Z
 PRIORITY:5
 END:VTODO
 END:VCALENDAR</cal:calendar-data>
@@ -142,6 +143,96 @@ END:VCALENDAR</cal:calendar-data>
   </d:response>
 </d:multistatus>`;
 
+// A task as the Nextcloud Tasks web UI stores it: local times pinned by a
+// VTIMEZONE whose DST rules carry DTSTART lines of their own, and a VALARM with
+// its own SUMMARY and DESCRIPTION, both ahead of the task's.
+const timezoneTodo = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nextcloud Tasks v0.18.1
+BEGIN:VTIMEZONE
+TZID:Europe/Malta
+BEGIN:DAYLIGHT
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0200
+DTSTART:19700329T020000
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU
+END:DAYLIGHT
+BEGIN:STANDARD
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+DTSTART:19701025T030000
+RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VTODO
+UID:task-timezone
+BEGIN:VALARM
+ACTION:DISPLAY
+SUMMARY:Alarm summary
+DESCRIPTION:Alarm description
+TRIGGER:-PT15M
+END:VALARM
+SUMMARY:Timezoned task
+STATUS:NEEDS-ACTION
+DTSTART;TZID=Europe/Malta:20260901T090000
+DUE;TZID=Europe/Malta:20260930T170000
+END:VTODO
+END:VCALENDAR`;
+
+// An all-day task: DUE is a DATE, so a DTSTART beside it has to be one too.
+const allDayTodo = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VTODO
+UID:task-allday
+SUMMARY:All-day task
+STATUS:NEEDS-ACTION
+DUE;VALUE=DATE:20260828
+END:VTODO
+END:VCALENDAR`;
+
+// Metadata to clear, including a URL folded across two lines the way a server
+// returns one longer than 75 octets.
+const metadataTodo = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VTODO
+UID:task-metadata
+SUMMARY:Task with metadata
+STATUS:NEEDS-ACTION
+LOCATION:Old office
+URL:https://example.com/a/very/long/path/that/a/server/would/fold/across/two/
+ lines?query=1
+CATEGORIES:work,urgent
+END:VTODO
+END:VCALENDAR`;
+
+function todoResponse(name, calendarData) {
+  return `  <d:response>
+    <d:href>/remote.php/dav/calendars/tester/personal/${name}.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"${name}"</d:getetag>
+      <cal:calendar-data>${calendarData}</cal:calendar-data>
+    </d:prop></d:propstat>
+  </d:response>
+`;
+}
+
+function todoMultistatus(body) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">
+${body}</d:multistatus>`;
+}
+
+const timezoneTodoReport = todoMultistatus(todoResponse('timezone', timezoneTodo));
+const allDayTodoReport = todoMultistatus(todoResponse('allday', allDayTodo));
+const metadataTodoReport = todoMultistatus(todoResponse('metadata', metadataTodo));
+
+// The timezoned task is in the list report too, so `tasks list` is exercised
+// against a VCALENDAR that carries DTSTART lines outside the VTODO.
+const todoListReport = todoReport.replace(
+  '</d:multistatus>',
+  `${todoResponse('timezone', timezoneTodo)}</d:multistatus>`
+);
+
 const server = http.createServer(async (req, res) => {
   let body = '';
   for await (const chunk of req) body += chunk;
@@ -163,7 +254,13 @@ const server = http.createServer(async (req, res) => {
   } else if (req.method === 'REPORT' &&
              req.url === '/remote.php/dav/calendars/tester/personal/') {
     res.setHeader('content-type', 'application/xml');
-    res.end(body.includes('VTODO') ? todoReport : eventReport);
+    // findTaskPath names the UID it is looking for in the query, so a fixture can
+    // be aimed at one test without changing what `tasks list` sees.
+    if (!body.includes('VTODO')) res.end(eventReport);
+    else if (body.includes('task-timezone')) res.end(timezoneTodoReport);
+    else if (body.includes('task-allday')) res.end(allDayTodoReport);
+    else if (body.includes('task-metadata')) res.end(metadataTodoReport);
+    else res.end(todoListReport);
   } else {
     res.setHeader('content-type', 'text/plain');
     res.end('ok');
@@ -507,6 +604,294 @@ for (const [subcommand, args] of [
     { result }
   );
 }
+
+// New task metadata options: status and percent-complete.
+before = requests.length;
+result = await run([
+  'tasks', 'edit',
+  '--uid', 'task-1',
+  '--status', 'IN-PROCESS',
+  '--percent-complete', '42'
+]);
+const metadataPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'tasks edit writes STATUS and PERCENT-COMPLETE',
+  result.code === 0 &&
+    metadataPut?.body.includes('STATUS:IN-PROCESS') &&
+    metadataPut?.body.includes('PERCENT-COMPLETE:42'),
+  { body: metadataPut?.body ?? null, result }
+);
+
+for (const [flag, value, expectedMsg] of [
+  ['--status', 'INVALID', "Invalid status 'INVALID'"],
+  ['--percent-complete', '101', 'Percent-complete must be between 0 and 100'],
+  ['--percent-complete', 'abc', 'Percent-complete must be an integer']
+]) {
+  before = requests.length;
+  result = await run(['tasks', 'edit', '--uid', 'task-1', flag, value]);
+  record(
+    `tasks edit rejects ${flag}=${value} before a request`,
+    result.code !== 0 &&
+      result.stderr.includes(expectedMsg) &&
+      requests.length === before,
+    { result }
+  );
+}
+
+// Extended task metadata: start, location, url, class, tags.
+before = requests.length;
+result = await run([
+  'tasks', 'create',
+  '--title', 'Full metadata task',
+  '--start', '2026-09-01T10:00:00Z',
+  '--due', '2026-09-02T10:00:00Z',
+  '--priority', '5',
+  '--location', 'Home office',
+  '--url', 'https://example.com',
+  '--class', 'PRIVATE',
+  '--tags', 'work,urgent'
+]);
+const createMetadataPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'tasks create writes start, location, url, class, and tags',
+  result.code === 0 &&
+    createMetadataPut?.body.includes('DTSTART:20260901') &&
+    createMetadataPut?.body.includes('DUE:20260902') &&
+    createMetadataPut?.body.includes('PRIORITY:5') &&
+    createMetadataPut?.body.includes('LOCATION:Home office') &&
+    createMetadataPut?.body.includes('URL:https://example.com') &&
+    createMetadataPut?.body.includes('CLASS:PRIVATE') &&
+    createMetadataPut?.body.includes('CATEGORIES:work,urgent'),
+  { body: createMetadataPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run([
+  'tasks', 'edit',
+  '--uid', 'task-1',
+  '--start', '2026-07-01T10:00:00Z',
+  '--location', 'Updated office',
+  '--url', 'https://updated.example.com',
+  '--class', 'CONFIDENTIAL',
+  '--tags', 'review,later'
+]);
+const editMetadataPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'tasks edit writes start, location, url, class, and tags',
+  result.code === 0 &&
+    editMetadataPut?.body.includes('DTSTART:20260701') &&
+    editMetadataPut?.body.includes('LOCATION:Updated office') &&
+    editMetadataPut?.body.includes('URL:https://updated.example.com') &&
+    editMetadataPut?.body.includes('CLASS:CONFIDENTIAL') &&
+    editMetadataPut?.body.includes('CATEGORIES:review,later'),
+  { body: editMetadataPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run([
+  'tasks', 'create',
+  '--title', 'Inverted dates',
+  '--start', '2026-09-02T10:00:00Z',
+  '--due', '2026-09-01T10:00:00Z'
+]);
+record(
+  'tasks create rejects start date after due date before a request',
+  result.code !== 0 &&
+    result.stderr.includes('Start date must be earlier than or equal to due date') &&
+    requests.length === before,
+  { result }
+);
+
+before = requests.length;
+result = await run([
+  'tasks', 'edit',
+  '--uid', 'task-1',
+  '--start', '2099-01-01T00:00:00Z'
+]);
+const editValidationPuts = requests.slice(before).filter(entry => entry.method === 'PUT');
+record(
+  'tasks edit rejects start date after existing due date before a PUT',
+  result.code !== 0 &&
+    result.stderr.includes('Start date must be earlier than or equal to due date') &&
+    editValidationPuts.length === 0,
+  { result }
+);
+
+for (const [flag, value, expectedMsg] of [
+  ['--class', 'SECRET', "Invalid class 'SECRET'"],
+  ['--class', 'public', ''] // valid, lowercase should normalize
+]) {
+  before = requests.length;
+  result = await run(['tasks', 'edit', '--uid', 'task-1', flag, value]);
+  if (expectedMsg === '') {
+    record(
+      'tasks edit accepts lowercase class values',
+      result.code === 0,
+      { result }
+    );
+  } else {
+    record(
+      `tasks edit rejects ${flag}=${value} before a request`,
+      result.code !== 0 &&
+        result.stderr.includes(expectedMsg) &&
+        requests.length === before,
+      { result }
+    );
+  }
+}
+// --- Properties are read from and written to the VTODO, not the VCALENDAR ---
+
+before = requests.length;
+result = await run([
+  'tasks', 'edit',
+  '--uid', 'task-timezone',
+  '--start', '2026-09-02T10:00:00Z'
+]);
+const timezonePut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'editing a start leaves the VTIMEZONE DST rules alone',
+  result.code === 0 &&
+    /BEGIN:VTODO[\s\S]*DTSTART:20260902T100000Z[\s\S]*END:VTODO/.test(timezonePut?.body ?? '') &&
+    timezonePut?.body.includes('DTSTART:19700329T020000') &&
+    timezonePut?.body.includes('DTSTART:19701025T030000') &&
+    !timezonePut?.body.includes('DTSTART;TZID=Europe/Malta:20260901T090000'),
+  { body: timezonePut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run(['tasks', 'edit', '--uid', 'task-timezone', '--title', 'Renamed']);
+const alarmPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'editing a title leaves a VALARM subcomponent alone',
+  result.code === 0 &&
+    alarmPut?.body.includes('SUMMARY:Renamed') &&
+    alarmPut?.body.includes('SUMMARY:Alarm summary') &&
+    !alarmPut?.body.includes('SUMMARY:Timezoned task'),
+  { body: alarmPut?.body ?? null, result }
+);
+
+result = await run(['tasks', 'list', '--calendar', 'Personal']);
+let timezoneTask = null;
+try {
+  timezoneTask = (JSON.parse(result.stdout)?.data ?? [])
+    .find(task => task.uid === 'task-timezone') ?? null;
+} catch {
+  // The assertion below preserves the parse failure as test evidence.
+}
+record(
+  'tasks list reports the task start, not a VTIMEZONE DST rule',
+  result.code === 0 && timezoneTask?.start === '20260901T090000',
+  { timezoneTask, result }
+);
+
+// --- All-day tasks keep the DATE value type on both ends ---
+
+before = requests.length;
+result = await run(['tasks', 'edit', '--uid', 'task-allday', '--start', '2026-08-27']);
+const allDayPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'a start added to an all-day task is written as a DATE',
+  result.code === 0 &&
+    allDayPut?.body.includes('DTSTART;VALUE=DATE:20260827') &&
+    allDayPut?.body.includes('DUE;VALUE=DATE:20260828'),
+  { body: allDayPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run(['tasks', 'edit', '--uid', 'task-allday', '--start', '2026-08-28T09:00:00Z']);
+record(
+  'a timed start on an all-day task is refused rather than written',
+  result.code !== 0 &&
+    result.stderr.includes('must both be all-day dates') &&
+    requests.slice(before).filter(entry => entry.method === 'PUT').length === 0,
+  { result }
+);
+
+before = requests.length;
+result = await run(['tasks', 'create', '--title', 'All-day', '--due', '2026-09-02']);
+const allDayCreatePut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'a due date with no time creates an all-day task',
+  result.code === 0 && allDayCreatePut?.body.includes('DUE;VALUE=DATE:20260902'),
+  { body: allDayCreatePut?.body ?? null, result }
+);
+
+// --- Clearing metadata, and replacing a folded value ---
+
+before = requests.length;
+result = await run([
+  'tasks', 'edit',
+  '--uid', 'task-metadata',
+  '--location', '',
+  '--url', '',
+  '--tags', ''
+]);
+const clearPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'an empty value removes the property from the task',
+  result.code === 0 &&
+    !/^LOCATION[;:]/m.test(clearPut?.body ?? '') &&
+    !/^URL[;:]/m.test(clearPut?.body ?? '') &&
+    !/^CATEGORIES[;:]/m.test(clearPut?.body ?? '') &&
+    !clearPut?.body.includes('lines?query=1'),
+  { body: clearPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run([
+  'tasks', 'edit',
+  '--uid', 'task-metadata',
+  '--url', 'https://example.com/short'
+]);
+const refoldPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'replacing a folded value takes its continuation lines with it',
+  result.code === 0 &&
+    refoldPut?.body.includes('URL:https://example.com/short') &&
+    !refoldPut?.body.includes('lines?query=1'),
+  { body: refoldPut?.body ?? null, result }
+);
+
+// --- URL is a URI, not escaped text ---
+
+before = requests.length;
+result = await run([
+  'tasks', 'create',
+  '--title', 'Linked task',
+  '--url', 'https://example.com/search?a=1,b=2'
+]);
+const uriPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'a comma in a URL is written literally, not backslash-escaped',
+  result.code === 0 &&
+    uriPut?.body.includes('URL:https://example.com/search?a=1,b=2'),
+  { body: uriPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run(['tasks', 'create', '--title', 'Bad link', '--url', 'not a uri']);
+record(
+  'a URL containing spaces is rejected before a request',
+  result.code !== 0 &&
+    result.stderr.includes('URL must be a single URI') &&
+    requests.length === before,
+  { result }
+);
+
+// --- Timestamps we generate are UTC ---
+
+before = requests.length;
+result = await run(['tasks', 'complete', '--uid', 'task-1']);
+const completePut = requests.slice(before).find(entry => entry.method === 'PUT');
+const completedStamp = (completePut?.body ?? '').match(/^COMPLETED:(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/m);
+const completedAt = completedStamp
+  ? Date.parse(`${completedStamp[1]}-${completedStamp[2]}-${completedStamp[3]}T${completedStamp[4]}:${completedStamp[5]}:${completedStamp[6]}Z`)
+  : NaN;
+record(
+  'COMPLETED is stamped in UTC, as its Z suffix claims',
+  result.code === 0 && Math.abs(Date.now() - completedAt) < 5 * 60 * 1000,
+  { body: completePut?.body ?? null, result }
+);
 } finally {
   await new Promise(resolveClose => server.close(resolveClose));
 }

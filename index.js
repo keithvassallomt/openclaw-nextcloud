@@ -24,7 +24,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { Buffer } from 'node:buffer';
 import { XMLParser } from 'fast-xml-parser';
-import { addDays, formatISO, format } from 'date-fns';
+import { addDays, formatISO } from 'date-fns';
 import crypto from 'node:crypto';
 
 // --- Configuration ---
@@ -245,6 +245,55 @@ function parsePriorityInput(value) {
     return String(value);
 }
 
+function parseStatusInput(value) {
+    const normalized = String(value).toUpperCase();
+    const validStatuses = ['NEEDS-ACTION', 'IN-PROCESS', 'COMPLETED', 'CANCELLED'];
+    if (!validStatuses.includes(normalized)) {
+        throw new Error(`Invalid status '${value}'. Valid values: ${validStatuses.join(', ')}.`);
+    }
+    return normalized;
+}
+
+function parsePercentCompleteInput(value) {
+    const str = String(value);
+    if (!/^\d{1,3}$/.test(str)) {
+        throw new Error('Percent-complete must be an integer from 0 to 100.');
+    }
+    const num = parseInt(str, 10);
+    if (num < 0 || num > 100) {
+        throw new Error('Percent-complete must be between 0 and 100.');
+    }
+    return String(num);
+}
+
+function parseClassInput(value) {
+    const normalized = String(value).toUpperCase();
+    const validClasses = ['PUBLIC', 'PRIVATE', 'CONFIDENTIAL'];
+    if (!validClasses.includes(normalized)) {
+        throw new Error(`Invalid class '${value}'. Valid values: ${validClasses.join(', ')}.`);
+    }
+    return normalized;
+}
+
+// URL carries a URI value (RFC 5545 3.8.4.6), not TEXT, so the TEXT escaping of
+// commas and semicolons must not be applied to it — another client would render
+// the backslashes literally. Nothing needs escaping in a well-formed URI, so
+// reject the characters that would break the property line instead.
+function parseUriInput(value) {
+    const uri = String(value).trim();
+    if (/[\u0000-\u001F\u007F]/.test(uri) || /\s/.test(uri)) {
+        throw new Error('URL must be a single URI with no spaces or line breaks.');
+    }
+    return uri;
+}
+
+function parseTagsInput(value) {
+    if (typeof value !== 'string' || value.trim() === '') {
+        return [];
+    }
+    return value.split(',').map(tag => tag.trim()).filter(Boolean);
+}
+
 const MAX_TEXT_INPUT_BYTES = 64 * 1024 * 1024;
 const CONFIRMATION_REQUIRED = new Set([
     'notes:delete',
@@ -260,6 +309,9 @@ const CONFIRMATION_REQUIRED = new Set([
     'labels:delete'
 ]);
 
+// A flag that takes one value. An empty value is meaningful — on `tasks edit` it
+// clears the property — so it is returned as '', while the flag with no value at
+// all is a typo rather than a request to clear.
 function getOptionValue(args, flag) {
     const index = args.indexOf(flag);
     if (index === -1) return undefined;
@@ -371,6 +423,61 @@ function parseDateInput(str) {
         throw new Error(`Invalid date '${str}'. Use ISO 8601 (2026-04-15T17:00:00Z) or CalDAV compact format (20260415T170000Z).`);
     }
     return date;
+}
+
+function toCalDavDate(date) {
+    return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+}
+
+// A DTSTART/DUE value as both an instant (for ordering) and the text to write,
+// keeping the RFC 5545 value type. A calendar date with no time of day is a
+// DATE — an all-day task — and writing it as midnight UTC instead would land it
+// on the previous day for anyone west of UTC.
+function parseCalendarValue(str) {
+    const raw = String(str).trim();
+    const dateOnly = /^(\d{4})-?(\d{2})-?(\d{2})$/.exec(raw);
+    if (dateOnly) {
+        const [, y, mo, d] = dateOnly;
+        const date = new Date(`${y}-${mo}-${d}T00:00:00Z`);
+        if (isNaN(date.getTime())) {
+            throw new Error(`Invalid date '${str}'. Use ISO 8601 (2026-04-15) or CalDAV compact format (20260415).`);
+        }
+        return { date, isDate: true, ical: `${y}${mo}${d}` };
+    }
+    const date = parseDateInput(raw);
+    return { date, isDate: false, ical: toCalDavDate(date) };
+}
+
+// Read a DTSTART/DUE back out of stored calendar data so an edit can be checked
+// against it. A value another client wrote in a form we cannot parse yields
+// null rather than an exception: it should not block an edit to a different
+// property of the same task.
+function readCalendarValue(text, prop) {
+    const match = text.match(new RegExp(`^${prop}(;[^:\r\n]*)?:(.*)$`, 'm'));
+    if (!match) return null;
+    try {
+        const value = parseCalendarValue(match[2].trim());
+        const declaredDate = /(?:^|;)VALUE=DATE(?:;|$)/i.test(match[1] || '');
+        return declaredDate ? { ...value, isDate: true } : value;
+    } catch {
+        return null;
+    }
+}
+
+// The ordering and value-type rules RFC 5545 3.6.2 puts on a VTODO's DTSTART
+// and DUE. Both arguments are parseCalendarValue() results, or null where the
+// task has no such property.
+function validateTaskDates(start, due) {
+    if (!start || !due) return;
+    if (start.isDate !== due.isDate) {
+        throw new Error(
+            "A task's start and due dates must both be all-day dates (2026-04-15) or both carry a " +
+            'time (2026-04-15T17:00:00Z). Set --start and --due together to change which form the task uses.'
+        );
+    }
+    if (start.date.getTime() > due.date.getTime()) {
+        throw new Error('Start date must be earlier than or equal to due date.');
+    }
 }
 
 // --- Modules ---
@@ -708,12 +815,8 @@ const CalDAV = {
         const calendars = await this.findCalendars('VEVENT');
         const allEvents = [];
 
-        const toCalDavDate = (dateStr) => {
-            const d = parseDateInput(dateStr);
-            return d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-        };
-        const startStr = toCalDavDate(start);
-        const endStr = toCalDavDate(end);
+        const startStr = toCalDavDate(parseDateInput(start));
+        const endStr = toCalDavDate(parseDateInput(end));
 
         const body = `
             <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
@@ -820,22 +923,51 @@ const CalDAV = {
                         continue; 
                      }
                      const calData = propstats[0]['d:prop']['cal:calendar-data'];
-                     const unfolded = calData.replace(/\r?\n[ \t]/g, '');
+                     // The VTODO's own lines only. A VCALENDAR that carries a VTIMEZONE has
+                     // DTSTART lines for the DST rules, and every match below is anchored so a
+                     // DESCRIPTION quoting "DUE:" cannot stand in for the property either.
+                     const vtodo = this._componentText(calData);
+                     if (!vtodo) continue;
 
-                     const summaryMatch = calData.match(/SUMMARY:(.*)/);
-                     const descriptionMatch = unfolded.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
-                     // Anchored so REQUEST-STATUS, or a DESCRIPTION mentioning "STATUS:", cannot be
-                     // mistaken for the task's own status now that it decides visibility below.
-                     const statusMatch = unfolded.match(/^STATUS(?:;[^:]*)?:(.*)$/m);
-                     const uidMatch = calData.match(/UID:(.*)/);
-                     const dueMatch = calData.match(/DUE(?:;.*)?:(.*)/);
-                     const priorityMatch = calData.match(/PRIORITY:(.*)/);
+                     const summaryMatch = vtodo.match(/^SUMMARY(?:;[^:]*)?:(.*)$/m);
+                     const descriptionMatch = vtodo.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
+                     const statusMatch = vtodo.match(/^STATUS(?:;[^:]*)?:(.*)$/m);
+                     const uidMatch = vtodo.match(/^UID(?:;[^:]*)?:(.*)$/m);
+                     const startMatch = vtodo.match(/^DTSTART(?:;[^:]*)?:(.*)$/m);
+                     const dueMatch = vtodo.match(/^DUE(?:;[^:]*)?:(.*)$/m);
+                     const priorityMatch = vtodo.match(/^PRIORITY(?:;[^:]*)?:(.*)$/m);
+                     const locationMatch = vtodo.match(/^LOCATION(?:;[^:]*)?:(.*)$/m);
+                     const urlMatch = vtodo.match(/^URL(?:;[^:]*)?:(.*)$/m);
+                     const classMatch = vtodo.match(/^CLASS(?:;[^:]*)?:(.*)$/m);
+                     const categoriesMatch = vtodo.match(/^CATEGORIES(?:;[^:]*)?:(.*)$/m);
 
+                     // STATUS decides visibility below, so REQUEST-STATUS and a DESCRIPTION
+                     // mentioning "STATUS:" both have to be kept out of it.
                      const status = statusMatch ? statusMatch[1].trim() : 'NEEDS-ACTION';
                      // CalDAV prop-filter on STATUS only matches VTODOs where STATUS exists (RFC 4791 §3.6.4).
                      // Post-filter completed tasks so VTODOs with an implicit STATUS:NEEDS-ACTION
                      // (e.g. todos created by the Nextcloud Tasks web UI) are still returned.
                      if (status === 'COMPLETED') continue;
+
+                     let tags = null;
+                     if (categoriesMatch) {
+                         const rawTags = categoriesMatch[1].trim();
+                         const split = [];
+                         let current = '';
+                         for (let i = 0; i < rawTags.length; i++) {
+                             const char = rawTags[i];
+                             if (char === '\\' && i + 1 < rawTags.length) {
+                                 current += char + rawTags[++i];
+                             } else if (char === ',') {
+                                 split.push(current);
+                                 current = '';
+                             } else {
+                                 current += char;
+                             }
+                         }
+                         split.push(current);
+                         tags = split.map(t => unescapePropertyValue(t.trim())).filter(Boolean);
+                     }
 
                      allTodos.push({
                          uid: uidMatch ? uidMatch[1].trim() : 'No UID',
@@ -843,8 +975,13 @@ const CalDAV = {
                          summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : 'No Title',
                          description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
                          status: status,
+                         start: startMatch ? startMatch[1].trim() : null,
                          due: dueMatch ? dueMatch[1].trim() : null,
-                         priority: priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : null
+                         priority: priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : null,
+                         location: locationMatch ? unescapePropertyValue(locationMatch[1].trim()) : null,
+                         url: urlMatch ? unescapePropertyValue(urlMatch[1].trim()) : null,
+                         class: classMatch ? classMatch[1].trim().toUpperCase() : null,
+                         tags: tags
                      });
                  }
              } catch (e) {
@@ -931,38 +1068,92 @@ const CalDAV = {
         return null;
     },
     
-    _updateProperty(vcal, prop, value) {
-        if (value === null || value === undefined) {
-            return vcal;
+    // Index the lines belonging to the VTODO or VEVENT itself. Properties must
+    // never be read from or written to anything else in the VCALENDAR: a
+    // VTIMEZONE carries DTSTART lines of its own (the DST rules, dated 1970),
+    // and a VALARM carries its own SUMMARY and DESCRIPTION. An unscoped match
+    // finds whichever comes first in the file.
+    _componentLines(lines) {
+        let name = null;
+        let nested = 0;
+        const own = [];
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!name) {
+                const begin = /^BEGIN:(VTODO|VEVENT)\s*$/.exec(line);
+                if (begin) name = begin[1];
+                continue;
+            }
+            if (nested === 0 && new RegExp(`^END:${name}\\s*$`).test(line)) {
+                return { name, own, end: i };
+            }
+            if (/^BEGIN:/.test(line)) nested++;
+            else if (/^END:/.test(line)) nested--;
+            else if (nested === 0) own.push(i);
         }
-        // Match an existing line including any property parameters (e.g. DUE;TZID=Europe/London:...).
-        const regex = new RegExp(`^${prop}(?:;[^:\\r\\n]*)?:.*$`, 'm');
-        const newLine = `${prop}:${value}`;
-        if (regex.test(vcal)) {
-            return vcal.replace(regex, () => newLine);
-        }
-        const endMatch = vcal.match(/END:(VTODO|VEVENT)/);
-        if (!endMatch) {
-            throw new Error('Cannot insert property: no END:VTODO or END:VEVENT found in calendar data.');
-        }
-        return vcal.replace(endMatch[0], () => `${newLine}\n${endMatch[0]}`);
+        return null;
     },
 
-    async createTask(title, calendarName, dueDate, priority, description) {
+    // The component's own property lines, unfolded, for reading values out of.
+    _componentText(vcal) {
+        const lines = vcal.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
+        const component = this._componentLines(lines);
+        return component ? component.own.map(i => lines[i]).join('\n') : '';
+    },
+
+    // Replace, insert, or (value === null) remove a property on the component.
+    _updateProperty(vcal, prop, value, params = null) {
+        if (value === undefined) return vcal;
+
+        const lines = vcal.split(/\r?\n/);
+        const component = this._componentLines(lines);
+        if (!component) {
+            throw new Error('Cannot insert property: no END:VTODO or END:VEVENT found in calendar data.');
+        }
+
+        const eol = vcal.includes('\r\n') ? '\r\n' : '\n';
+        const newLine = value === null ? null : `${prop}${params ? `;${params}` : ''}:${value}`;
+        // Match an existing line including any property parameters (e.g. DUE;TZID=Europe/London:...).
+        const regex = new RegExp(`^${prop}(?:;[^:]*)?:`);
+        const first = component.own.find(i => regex.test(lines[i]));
+
+        if (first === undefined) {
+            if (newLine === null) return vcal;
+            lines.splice(component.end, 0, newLine);
+            return lines.join(eol);
+        }
+
+        // A value longer than 75 octets is folded across continuation lines
+        // (RFC 5545 3.1); they are part of this property and go with it.
+        let last = first;
+        while (last + 1 < lines.length && /^[ \t]/.test(lines[last + 1])) last++;
+        lines.splice(first, last - first + 1, ...(newLine === null ? [] : [newLine]));
+        return lines.join(eol);
+    },
+
+    async createTask(title, calendarName, options = {}) {
+        const start = options.startDate ? parseCalendarValue(options.startDate) : null;
+        const due = options.dueDate ? parseCalendarValue(options.dueDate) : null;
+        validateTaskDates(start, due);
+
         const cal = await this.getCalendar(calendarName, 'VTODO');
         const uid = crypto.randomUUID();
         const now = new Date();
-        const dtstamp = format(now, "yyyyMMdd'T'HHmmss'Z'");
+        const dtstamp = toCalDavDate(now);
 
         let vtodo = `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OpenClaw//Nextcloud Skill//EN\nBEGIN:VTODO\nUID:${uid}\nDTSTAMP:${dtstamp}\nSUMMARY:${escapePropertyValue(title)}\nSTATUS:NEEDS-ACTION\n`;
 
-        if (dueDate) {
-             const due = parseDateInput(dueDate);
-             vtodo += `DUE:${format(due, "yyyyMMdd'T'HHmmss'Z'")}\n`;
-        }
+        if (start) vtodo += `DTSTART${start.isDate ? ';VALUE=DATE' : ''}:${start.ical}\n`;
+        if (due) vtodo += `DUE${due.isDate ? ';VALUE=DATE' : ''}:${due.ical}\n`;
 
-        if (priority) vtodo += `PRIORITY:${priority}\n`;
-        if (description) vtodo += `DESCRIPTION:${escapePropertyValue(description)}\n`;
+        if (options.priority) vtodo += `PRIORITY:${options.priority}\n`;
+        if (options.description) vtodo += `DESCRIPTION:${escapePropertyValue(options.description)}\n`;
+        if (options.location) vtodo += `LOCATION:${escapePropertyValue(options.location)}\n`;
+        if (options.url) vtodo += `URL:${options.url}\n`;
+        if (options.className) vtodo += `CLASS:${options.className}\n`;
+        if (options.tags && options.tags.length > 0) {
+            vtodo += `CATEGORIES:${options.tags.map(escapePropertyValue).join(',')}\n`;
+        }
 
         vtodo += `END:VTODO\nEND:VCALENDAR`;
 
@@ -991,10 +1182,42 @@ const CalDAV = {
         if (updates.title) vtodo = this._updateProperty(vtodo, 'SUMMARY', escapePropertyValue(updates.title));
         if (updates.priority) vtodo = this._updateProperty(vtodo, 'PRIORITY', updates.priority);
         if (updates.description) vtodo = this._updateProperty(vtodo, 'DESCRIPTION', escapePropertyValue(updates.description));
-        if (updates.dueDate) {
-             const due = parseDateInput(updates.dueDate);
-             vtodo = this._updateProperty(vtodo, 'DUE', format(due, "yyyyMMdd'T'HHmmss'Z'"));
+        if (updates.startDate || updates.dueDate) {
+            const start = updates.startDate ? parseCalendarValue(updates.startDate) : null;
+            const due = updates.dueDate ? parseCalendarValue(updates.dueDate) : null;
+            // Check against the stored dates when only one side is being changed, reading
+            // them from the VTODO itself so a VTIMEZONE's DST rules cannot stand in for
+            // the task's own start.
+            const stored = this._componentText(vtodo);
+            validateTaskDates(
+                start || readCalendarValue(stored, 'DTSTART'),
+                due || readCalendarValue(stored, 'DUE')
+            );
+
+            if (start) vtodo = this._updateProperty(vtodo, 'DTSTART', start.ical, start.isDate ? 'VALUE=DATE' : null);
+            if (due) vtodo = this._updateProperty(vtodo, 'DUE', due.ical, due.isDate ? 'VALUE=DATE' : null);
         }
+        if (updates.location !== undefined) {
+            vtodo = this._updateProperty(vtodo, 'LOCATION', updates.location === null ? null : escapePropertyValue(updates.location));
+        }
+        if (updates.url !== undefined) {
+            vtodo = this._updateProperty(vtodo, 'URL', updates.url);
+        }
+        if (updates.className !== undefined) {
+            vtodo = this._updateProperty(vtodo, 'CLASS', updates.className);
+        }
+        if (updates.tags !== undefined) {
+            vtodo = this._updateProperty(
+                vtodo,
+                'CATEGORIES',
+                updates.tags === null || updates.tags.length === 0
+                    ? null
+                    : updates.tags.map(escapePropertyValue).join(',')
+            );
+        }
+
+        if (updates.status) vtodo = this._updateProperty(vtodo, 'STATUS', updates.status);
+        if (updates.percentComplete !== undefined) vtodo = this._updateProperty(vtodo, 'PERCENT-COMPLETE', updates.percentComplete);
 
         await request(task.href, {
             method: 'PUT',
@@ -1023,7 +1246,7 @@ const CalDAV = {
         
         let vtodo = task.data;
         const now = new Date();
-        const completedDate = format(now, "yyyyMMdd'T'HHmmss'Z'");
+        const completedDate = toCalDavDate(now);
         
         vtodo = this._updateProperty(vtodo, 'STATUS', 'COMPLETED');
         vtodo = this._updateProperty(vtodo, 'COMPLETED', completedDate);
@@ -1050,14 +1273,9 @@ const CalDAV = {
         const cal = await this.getCalendar(calendarName, 'VEVENT');
         const uid = crypto.randomUUID();
         const now = new Date();
-        const dtstamp = format(now, "yyyyMMdd'T'HHmmss'Z'");
+        const dtstamp = toCalDavDate(now);
 
-        const toCalDavDate = (dateStr) => {
-            const d = parseDateInput(dateStr);
-            return d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-        };
-
-        let vevent = `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OpenClaw//Nextcloud Skill//EN\nBEGIN:VEVENT\nUID:${uid}\nDTSTAMP:${dtstamp}\nSUMMARY:${escapePropertyValue(summary)}\nDTSTART:${toCalDavDate(start)}\nDTEND:${toCalDavDate(end)}\n`;
+        let vevent = `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OpenClaw//Nextcloud Skill//EN\nBEGIN:VEVENT\nUID:${uid}\nDTSTAMP:${dtstamp}\nSUMMARY:${escapePropertyValue(summary)}\nDTSTART:${toCalDavDate(parseDateInput(start))}\nDTEND:${toCalDavDate(parseDateInput(end))}\n`;
 
         if (description) vevent += `DESCRIPTION:${escapePropertyValue(description)}\n`;
         if (location) vevent += `LOCATION:${escapePropertyValue(location)}\n`;
@@ -1157,11 +1375,11 @@ const CalDAV = {
         if (updates.summary) vevent = this._updateProperty(vevent, 'SUMMARY', escapePropertyValue(updates.summary));
         if (updates.start) {
             const d = parseDateInput(updates.start);
-            vevent = this._updateProperty(vevent, 'DTSTART', d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z');
+            vevent = this._updateProperty(vevent, 'DTSTART', toCalDavDate(d));
         }
         if (updates.end) {
             const d = parseDateInput(updates.end);
-            vevent = this._updateProperty(vevent, 'DTEND', d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z');
+            vevent = this._updateProperty(vevent, 'DTEND', toCalDavDate(d));
         }
         if (updates.description !== undefined) {
             vevent = this._updateProperty(vevent, 'DESCRIPTION', escapePropertyValue(updates.description));
@@ -2188,7 +2406,30 @@ async function main() {
                     args, '--description', '--description-file'
                 ) ?? null;
 
-                output(await CalDAV.createTask(title, calendar, dueDate, priority, description));
+                const options = {
+                    title,
+                    calendar,
+                    dueDate,
+                    priority,
+                    description
+                };
+
+                const start = getOptionValue(args, '--start');
+                if (start) options.startDate = start;
+
+                const location = getOptionValue(args, '--location');
+                if (location) options.location = location;
+
+                const url = getOptionValue(args, '--url');
+                if (url) options.url = parseUriInput(url);
+
+                const className = getOptionValue(args, '--class');
+                if (className) options.className = parseClassInput(className);
+
+                const tags = getOptionValue(args, '--tags');
+                if (tags) options.tags = parseTagsInput(tags);
+
+                output(await CalDAV.createTask(title, calendar, options));
 
              } else if (subCommand === 'edit') {
                 const uidIndex = args.indexOf('--uid');
@@ -2214,6 +2455,32 @@ async function main() {
                     args, '--description', '--description-file'
                 );
                 if (description !== undefined) updates.description = description;
+
+                const start = getOptionValue(args, '--start');
+                if (start) updates.startDate = start;
+
+                // For these four, an empty value removes the property from the task.
+                const location = getOptionValue(args, '--location');
+                if (location !== undefined) updates.location = location === '' ? null : location;
+
+                const url = getOptionValue(args, '--url');
+                if (url !== undefined) updates.url = url === '' ? null : parseUriInput(url);
+
+                const className = getOptionValue(args, '--class');
+                if (className !== undefined) updates.className = className === '' ? null : parseClassInput(className);
+
+                const tags = getOptionValue(args, '--tags');
+                if (tags !== undefined) updates.tags = parseTagsInput(tags);
+
+                const statusIndex = args.indexOf('--status');
+                if (statusIndex !== -1) {
+                    updates.status = parseStatusInput(args[statusIndex + 1]);
+                }
+
+                const percentIndex = args.indexOf('--percent-complete');
+                if (percentIndex !== -1) {
+                    updates.percentComplete = parsePercentCompleteInput(args[percentIndex + 1]);
+                }
 
                 output(await CalDAV.updateTask(uid, calendar, updates));
 

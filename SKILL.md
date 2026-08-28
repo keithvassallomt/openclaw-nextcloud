@@ -176,10 +176,15 @@ password files.
 
 ### Tasks
 - `tasks list [--calendar <c>]`
-- `tasks create --title <t> [--calendar <c>] [--due <d>] [--priority <p>] [--description <d> | --description-file <file>]`
-- `tasks edit --uid <u> [--calendar <c>] [--title <t>] [--due <d>] [--priority <p>] [--description <d> | --description-file <file>]`
+- `tasks create --title <t> [--calendar <c>] [--start <d>] [--due <d>] [--priority <p>] [--description <d> | --description-file <file>] [--location <l>] [--url <u>] [--class PUBLIC|PRIVATE|CONFIDENTIAL] [--tags <comma-separated>]`
+- `tasks edit --uid <u> [--calendar <c>] [--title <t>] [--start <d>] [--due <d>] [--priority <p>] [--description <d> | --description-file <file>] [--location <l>] [--url <u>] [--class PUBLIC|PRIVATE|CONFIDENTIAL] [--tags <comma-separated>] [--status <s>] [--percent-complete <n>]`
 - `tasks delete --uid <u> [--calendar <c>] --confirm tasks:delete`
 - `tasks complete --uid <u> [--calendar <c>]`
+
+A date with no time of day (`2026-02-05`) makes an all-day task. A task's start
+and due dates must both be all-day or both carry a time, so pass `--start` and
+`--due` together to switch a task from one to the other. On `tasks edit`, an
+empty value (`--tags ""`) removes that property from the task.
 
 ### Calendar Events
 - `calendar list [--from <iso>] [--to <iso>]` (Defaults to next 7 days)
