@@ -2823,7 +2823,7 @@ async function main() {
                 throw new Error('Unknown labels command');
             }
         } else {
-            console.log('Usage: node scripts/nextcloud.js <notes|files|calendar|calendars|tasks|contacts|addressbooks|shares|boards|stacks|cards|labels> <list|get|create|search|edit|delete|move|create-link> [options]');
+            errorOutput('Usage: node scripts/nextcloud.js <notes|files|calendar|calendars|tasks|contacts|addressbooks|shares|boards|stacks|cards|labels> <list|get|create|search|edit|delete|move|create-link> [options]');
         }
     } catch (err) {
         errorOutput(err);
