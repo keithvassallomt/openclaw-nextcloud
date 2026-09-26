@@ -434,8 +434,7 @@ record(
 
 // --calendar on `calendar list` was accepted and ignored: the list branch read
 // only --from/--to and merged every VEVENT calendar, so a scoped request looked
-// correct whenever the default calendar held the event it was looking for. That
-// is how upstream issue #5 was closed as fixed while the flag still did nothing.
+// correct whenever the default calendar held the event it was looking for.
 result = await run([
   'calendar', 'list',
   '--from', '2026-07-28T00:00:00Z',
@@ -491,6 +490,17 @@ record(
   result.code !== 0 &&
     result.stderr.includes('NoSuchCalendar') &&
     result.stderr.includes('not found'),
+  { result }
+);
+
+// A bare --calendar is a truncated command, not a request for every calendar.
+before = requests.length;
+result = await run(['calendar', 'list', '--calendar']);
+record(
+  'calendar list --calendar with no value is rejected',
+  result.code !== 0 &&
+    result.stderr.includes('Missing value for --calendar') &&
+    requests.length === before,
   { result }
 );
 
@@ -1143,10 +1153,9 @@ record(
   { body: completePut?.body ?? null, result }
 );
 
-// Unknown flags used to be accepted and ignored, which is how
-// `calendar list --calendar <name>` reported success for months while returning
-// every calendar anyway (issue #5). A typo must fail loudly, and the message must
-// name what the command does accept so the caller can fix it in one round trip.
+// Unknown flags used to be accepted and ignored. A typo must fail loudly, and the
+// message must name what the command does accept so the caller can fix it in one
+// round trip.
 before = requests.length;
 result = await run(['notes', 'list', '--category', 'Work']);
 record(
@@ -1179,6 +1188,27 @@ record(
   { result }
 );
 
+// The cards block reads --board, --stack and --card before dispatching, but not
+// every subcommand uses them. Listing them on every subcommand let
+// `cards comment-list --board 1` through while the value went nowhere.
+for (const args of [
+  ['cards', 'comment-list', '--card', '3', '--board', '1'],
+  ['cards', 'comment-add', '--card', '3', '--message', 'x', '--stack', '2'],
+  ['cards', 'list', '--board', '1', '--card', '3'],
+  ['cards', 'create', '--board', '1', '--stack', '2', '--title', 'x', '--card', '3']
+]) {
+  before = requests.length;
+  result = await run(args);
+  const flag = args.at(-2);
+  record(
+    `${args.slice(0, 2).join(' ')} rejects ${flag}, which it never uses`,
+    result.code !== 0 &&
+      result.stderr.includes(`Unknown option '${flag}'`) &&
+      requests.length === before,
+    { result }
+  );
+}
+
 // The guard must not reject documented usage.
 before = requests.length;
 result = await run(['notes', 'create', '--title', 'Guard sanity', '--content', 'body']);
@@ -1201,9 +1231,10 @@ record(
   { request: requests.at(-1), result }
 );
 
-// The guard's table must cover every flag the CLI actually reads, or a future edit
-// that adds a flag would start rejecting it. Read index.js (where the flag reads
-// live) rather than the bundle.
+// The guard's table must match the flags the CLI actually reads, in both
+// directions: a flag missing from the table would be rejected, and a flag in the
+// table that nothing reads would be accepted and ignored. Read index.js (where
+// the flag reads live) rather than the bundle.
 const sourceText = readFileSync(join(repoRoot, 'index.js'), 'utf8');
 const tableBlock = sourceText.match(/const FLAG_TABLE = \{[\s\S]*?\n\};/)?.[0] ?? '';
 const declaredFlags = new Set(tableBlock.match(/--[a-z-]+/g) ?? []);
@@ -1211,13 +1242,17 @@ const mainBody = sourceText.slice(sourceText.indexOf('async function main()'));
 const readFlags = new Set();
 for (const m of mainBody.matchAll(/indexOf\('(--[a-z-]+)'\)/g)) readFlags.add(m[1]);
 for (const m of mainBody.matchAll(/getOptionValue\(\s*args,\s*'(--[a-z-]+)'/g)) readFlags.add(m[1]);
-for (const m of mainBody.matchAll(/readTextOption\(\s*args,\s*'(--[a-z-]+)'/g)) readFlags.add(m[1]);
+for (const m of mainBody.matchAll(/readTextOption\(\s*args,\s*'(--[a-z-]+)',\s*'(--[a-z-]+)'/g)) {
+  readFlags.add(m[1]);
+  readFlags.add(m[2]);
+}
 readFlags.delete('--confirm');   // global, deliberately not in the table
 const uncoveredFlags = [...readFlags].filter(f => !declaredFlags.has(f)).sort();
+const unreadFlags = [...declaredFlags].filter(f => !readFlags.has(f)).sort();
 record(
-  'the flag guard table covers every flag the CLI reads',
-  tableBlock.length > 0 && uncoveredFlags.length === 0,
-  { uncoveredFlags, declaredCount: declaredFlags.size, readCount: readFlags.size }
+  'the flag guard table matches the flags the CLI reads',
+  tableBlock.length > 0 && uncoveredFlags.length === 0 && unreadFlags.length === 0,
+  { uncoveredFlags, unreadFlags, declaredCount: declaredFlags.size, readCount: readFlags.size }
 );
 } finally {
   await new Promise(resolveClose => server.close(resolveClose));

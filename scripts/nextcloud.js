@@ -18017,14 +18017,14 @@ var FLAG_TABLE = {
   },
   cards: {
     "assign-label": "--board --card --label --stack",
-    "comment-add": "--board --card --message --message-file --stack",
-    "comment-delete": "--board --card --comment --stack",
-    "comment-list": "--board --card --stack",
-    create: "--board --card --description --description-file --duedate --order --stack --title",
+    "comment-add": "--card --message --message-file",
+    "comment-delete": "--card --comment",
+    "comment-list": "--card",
+    create: "--board --description --description-file --duedate --order --stack --title",
     delete: "--board --card --stack",
     edit: "--archived --board --card --description --description-file --done --duedate --order --stack --title",
     get: "--board --card --stack",
-    list: "--board --card --stack",
+    list: "--board --stack",
     move: "--board --card --order --stack --to-stack",
     "remove-label": "--board --card --label --stack"
   },
@@ -19843,8 +19843,7 @@ async function main() {
       if (subCommand === "list") {
         const fromIndex = args.indexOf("--from");
         const toIndex = args.indexOf("--to");
-        const calIndex = args.indexOf("--calendar");
-        const calendar = calIndex !== -1 ? args[calIndex + 1] : null;
+        const calendar = getOptionValue(args, "--calendar");
         const start = fromIndex !== -1 ? args[fromIndex + 1] : (0, import_date_fns.formatISO)(/* @__PURE__ */ new Date());
         const end = toIndex !== -1 ? args[toIndex + 1] : (0, import_date_fns.formatISO)((0, import_date_fns.addDays)(/* @__PURE__ */ new Date(), 7));
         const result = await CalDAV.getEvents(start, end, calendar);

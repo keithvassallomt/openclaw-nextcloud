@@ -397,13 +397,13 @@ const CONFIRMATION_REQUIRED = new Set([
 // Every flag each command/subcommand accepts, read out of main() below.
 //
 // Per subcommand rather than per command so a flag that belongs to a sibling
-// (`notes list --category`) is rejected instead of ignored. Flags a command reads
-// before dispatching to a subcommand (--board, --stack in the cards/labels/stacks
-// blocks) are listed on every subcommand of that command, since they are valid
-// there.
+// (`notes list --category`) is rejected instead of ignored. A flag is listed only
+// on the subcommands that use it, even where main() reads it before dispatching:
+// the cards block reads --card up front, but `cards list` and `cards create`
+// never use it, and the comment-* subcommands never read --board or --stack.
 //
-// Keep in sync when adding a flag: test/regressions.mjs asserts this table covers
-// every flag the CLI reads.
+// Keep in sync when adding a flag: test/regressions.mjs asserts this table and
+// the flags main() reads match.
 const FLAG_TABLE = {
     addressbooks: {
         list: '',
@@ -426,14 +426,14 @@ const FLAG_TABLE = {
     },
     cards: {
         'assign-label': '--board --card --label --stack',
-        'comment-add': '--board --card --message --message-file --stack',
-        'comment-delete': '--board --card --comment --stack',
-        'comment-list': '--board --card --stack',
-        create: '--board --card --description --description-file --duedate --order --stack --title',
+        'comment-add': '--card --message --message-file',
+        'comment-delete': '--card --comment',
+        'comment-list': '--card',
+        create: '--board --description --description-file --duedate --order --stack --title',
         delete: '--board --card --stack',
         edit: '--archived --board --card --description --description-file --done --duedate --order --stack --title',
         get: '--board --card --stack',
-        list: '--board --card --stack',
+        list: '--board --stack',
         move: '--board --card --order --stack --to-stack',
         'remove-label': '--board --card --label --stack',
     },
@@ -491,11 +491,10 @@ const GLOBAL_FLAGS = ['--confirm'];
 
 // Reject a flag the command does not accept, instead of ignoring it.
 //
-// An ignored flag is indistinguishable from success: `calendar list --calendar
-// <name>` returned every calendar, exited 0, and looked correct, which is how
-// issue #5 was closed as fixed while the flag still did nothing. A typo or a flag
-// left over from an older interface must fail loudly, and the message names what
-// the command does accept so the caller can correct it without a second round trip.
+// An ignored flag is indistinguishable from success (`calendar list --calendar`
+// once returned every calendar and exited 0). A typo or a flag left over from an
+// older interface must fail loudly, and the message names what the command does
+// accept so the caller can correct it without a second round trip.
 //
 // Only flag position is checked, not required-ness: a missing --uid is reported by
 // the command itself with a message that says what is missing.
@@ -2570,8 +2569,7 @@ async function main() {
              if (subCommand === 'list') {
                 const fromIndex = args.indexOf('--from');
                 const toIndex = args.indexOf('--to');
-                const calIndex = args.indexOf('--calendar');
-                const calendar = calIndex !== -1 ? args[calIndex + 1] : null;
+                const calendar = getOptionValue(args, '--calendar');
                 const start = fromIndex !== -1 ? args[fromIndex + 1] : formatISO(new Date());
                 const end = toIndex !== -1 ? args[toIndex + 1] : formatISO(addDays(new Date(), 7));
                 const result = await CalDAV.getEvents(start, end, calendar);
