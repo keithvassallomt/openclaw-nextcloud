@@ -312,8 +312,11 @@ node scripts/nextcloud.js shares delete --id 29 --confirm shares:delete
 # List available calendars
 node scripts/nextcloud.js calendars list
 
-# List events in a date range
+# List events in a date range, across all calendars
 node scripts/nextcloud.js calendar list --from "2026-02-01T00:00:00Z" --to "2026-02-28T23:59:59Z"
+
+# Scope the listing to one calendar
+node scripts/nextcloud.js calendar list --from "2026-02-01T00:00:00Z" --to "2026-02-28T23:59:59Z" --calendar "Personal"
 
 # Create an event (with optional location)
 node scripts/nextcloud.js calendar create --summary "Team Meeting" --start "2026-02-05T10:00:00Z" --end "2026-02-05T11:00:00Z" --location "Conference Room B"

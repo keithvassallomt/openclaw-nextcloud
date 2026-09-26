@@ -167,6 +167,8 @@ password files.
 
 ## Commands
 
+Every command rejects a flag it does not accept, naming the flags it does accept. A typo, or a flag from a different command, is an error rather than a silent no-op.
+
 ### Notes
 - `notes list`
 - `notes get --id <id>`
@@ -187,7 +189,7 @@ and due dates must both be all-day or both carry a time, so pass `--start` and
 empty value (`--tags ""`) removes that property from the task.
 
 ### Calendar Events
-- `calendar list [--from <iso>] [--to <iso>]` (Defaults to next 7 days)
+- `calendar list [--from <iso>] [--to <iso>] [--calendar <c>]` (Defaults to next 7 days; omit `--calendar` for all calendars)
 - `calendar create --summary <s> --start <iso> --end <iso> [--calendar <c>] [--description <d> | --description-file <file>] [--location <l>]`
 - `calendar edit --uid <u> [--calendar <c>] [--summary <s>] [--start <iso>] [--end <iso>] [--description <d> | --description-file <file>] [--location <l>]`
 - `calendar delete --uid <u> [--calendar <c>] --confirm calendar:delete`

@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +17,16 @@ const calendarDiscovery = `<?xml version="1.0" encoding="utf-8"?>
       <d:resourcetype><d:collection/><cal:calendar/></d:resourcetype>
       <cal:supported-calendar-component-set>
         <cal:comp name="VEVENT"/><cal:comp name="VTODO"/>
+      </cal:supported-calendar-component-set>
+    </d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/calendars/tester/work/</d:href>
+    <d:propstat><d:prop>
+      <d:displayname>Work</d:displayname>
+      <d:resourcetype><d:collection/><cal:calendar/></d:resourcetype>
+      <cal:supported-calendar-component-set>
+        <cal:comp name="VEVENT"/>
       </cal:supported-calendar-component-set>
     </d:prop></d:propstat>
   </d:response>
@@ -65,6 +76,27 @@ DESCRIPTION:Line one\\nLine two
 LOCATION:Room\\; 2
 DTSTART:20260728T120000Z
 DTEND:20260728T130000Z
+END:VEVENT
+END:VCALENDAR</cal:calendar-data>
+    </d:prop></d:propstat>
+  </d:response>
+</d:multistatus>`;
+
+// A second event calendar, so a scoped `calendar list` can be told apart from an
+// unscoped one. Before the --calendar fix the list branch ignored the flag and
+// merged every calendar, so any assertion here passed whichever value was passed.
+const workEventReport = `<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/remote.php/dav/calendars/tester/work/standup.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"standup"</d:getetag>
+      <cal:calendar-data>BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:work-1
+SUMMARY:Standup
+DTSTART:20260728T090000Z
+DTEND:20260728T093000Z
 END:VEVENT
 END:VCALENDAR</cal:calendar-data>
     </d:prop></d:propstat>
@@ -253,6 +285,10 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('content-type', 'application/xml');
     res.end(groupedContactReport);
   } else if (req.method === 'REPORT' &&
+             req.url === '/remote.php/dav/calendars/tester/work/') {
+    res.setHeader('content-type', 'application/xml');
+    res.end(workEventReport);
+  } else if (req.method === 'REPORT' &&
              req.url === '/remote.php/dav/calendars/tester/personal/') {
     res.setHeader('content-type', 'application/xml');
     // findTaskPath names the UID it is looking for in the query, so a fixture can
@@ -394,6 +430,68 @@ record(
     listedEvent?.description === 'Line one\nLine two' &&
     listedEvent?.location === 'Room; 2',
   { listedEvent, result }
+);
+
+// --calendar on `calendar list` was accepted and ignored: the list branch read
+// only --from/--to and merged every VEVENT calendar, so a scoped request looked
+// correct whenever the default calendar held the event it was looking for. That
+// is how upstream issue #5 was closed as fixed while the flag still did nothing.
+result = await run([
+  'calendar', 'list',
+  '--from', '2026-07-28T00:00:00Z',
+  '--to', '2026-07-29T00:00:00Z',
+  '--calendar', 'Work'
+]);
+let workOnly = [];
+try {
+  workOnly = JSON.parse(result.stdout)?.data ?? [];
+} catch {
+  // The assertion below preserves the parse failure as test evidence.
+}
+record(
+  'calendar list --calendar scopes the result to that calendar alone',
+  result.code === 0 &&
+    workOnly.length === 1 &&
+    workOnly[0]?.uid === 'work-1' &&
+    workOnly.every(e => e.calendar === 'Work'),
+  { workOnly, result }
+);
+
+// Unscoped has to keep working: no flag means every calendar, as documented.
+result = await run([
+  'calendar', 'list',
+  '--from', '2026-07-28T00:00:00Z',
+  '--to', '2026-07-29T00:00:00Z'
+]);
+let unscoped = [];
+try {
+  unscoped = JSON.parse(result.stdout)?.data ?? [];
+} catch {
+  // The assertion below preserves the parse failure as test evidence.
+}
+record(
+  'calendar list without --calendar still returns every calendar',
+  result.code === 0 &&
+    unscoped.length === 2 &&
+    unscoped.some(e => e.calendar === 'Personal') &&
+    unscoped.some(e => e.calendar === 'Work'),
+  { unscoped, result }
+);
+
+// An unknown calendar name must fail loudly rather than silently returning
+// everything, which is the behaviour that hid this bug for so long.
+result = await run([
+  'calendar', 'list',
+  '--from', '2026-07-28T00:00:00Z',
+  '--to', '2026-07-29T00:00:00Z',
+  '--calendar', 'NoSuchCalendar'
+]);
+record(
+  'calendar list --calendar rejects an unknown calendar',
+  result.code !== 0 &&
+    result.stderr.includes('NoSuchCalendar') &&
+    result.stderr.includes('not found'),
+  { result }
 );
 
 // NEXTCLOUD_EMAIL is optional: unset, events must be written exactly as they
@@ -1043,6 +1141,83 @@ record(
   'COMPLETED is stamped in UTC, as its Z suffix claims',
   result.code === 0 && Math.abs(Date.now() - completedAt) < 5 * 60 * 1000,
   { body: completePut?.body ?? null, result }
+);
+
+// Unknown flags used to be accepted and ignored, which is how
+// `calendar list --calendar <name>` reported success for months while returning
+// every calendar anyway (issue #5). A typo must fail loudly, and the message must
+// name what the command does accept so the caller can fix it in one round trip.
+before = requests.length;
+result = await run(['notes', 'list', '--category', 'Work']);
+record(
+  'a flag that belongs to a sibling subcommand is rejected',
+  result.code !== 0 &&
+    result.stderr.includes("Unknown option '--category'") &&
+    result.stderr.includes('Accepted:') &&
+    requests.length === before,
+  { result }
+);
+
+before = requests.length;
+result = await run(['notes', 'list', '--nope']);
+record(
+  'a misspelled flag is rejected rather than ignored',
+  result.code !== 0 &&
+    result.stderr.includes("Unknown option '--nope'") &&
+    requests.length === before,
+  { result }
+);
+
+// The realistic mistake: a flag that is valid elsewhere in the CLI but not here.
+before = requests.length;
+result = await run(['notes', 'create', '--title', 'x', '--calendar', 'Personal']);
+record(
+  'a flag from another command is rejected',
+  result.code !== 0 &&
+    result.stderr.includes("Unknown option '--calendar'") &&
+    requests.length === before,
+  { result }
+);
+
+// The guard must not reject documented usage.
+before = requests.length;
+result = await run(['notes', 'create', '--title', 'Guard sanity', '--content', 'body']);
+record(
+  'documented flags still pass the guard',
+  result.code === 0 && requests.length === before + 1,
+  { result }
+);
+
+// A value that itself begins with dashes is a legitimate payload (frontmatter on
+// --content). The guard skips one argument after each accepted flag, so the value
+// must not be mistaken for a flag.
+before = requests.length;
+result = await run(['notes', 'create', '--title', 'Dash value', '--content', '--> not a flag']);
+record(
+  'a flag value beginning with dashes is not treated as a flag',
+  result.code === 0 &&
+    requests.length === before + 1 &&
+    requests.at(-1)?.body.includes('--> not a flag'),
+  { request: requests.at(-1), result }
+);
+
+// The guard's table must cover every flag the CLI actually reads, or a future edit
+// that adds a flag would start rejecting it. Read index.js (where the flag reads
+// live) rather than the bundle.
+const sourceText = readFileSync(join(repoRoot, 'index.js'), 'utf8');
+const tableBlock = sourceText.match(/const FLAG_TABLE = \{[\s\S]*?\n\};/)?.[0] ?? '';
+const declaredFlags = new Set(tableBlock.match(/--[a-z-]+/g) ?? []);
+const mainBody = sourceText.slice(sourceText.indexOf('async function main()'));
+const readFlags = new Set();
+for (const m of mainBody.matchAll(/indexOf\('(--[a-z-]+)'\)/g)) readFlags.add(m[1]);
+for (const m of mainBody.matchAll(/getOptionValue\(\s*args,\s*'(--[a-z-]+)'/g)) readFlags.add(m[1]);
+for (const m of mainBody.matchAll(/readTextOption\(\s*args,\s*'(--[a-z-]+)'/g)) readFlags.add(m[1]);
+readFlags.delete('--confirm');   // global, deliberately not in the table
+const uncoveredFlags = [...readFlags].filter(f => !declaredFlags.has(f)).sort();
+record(
+  'the flag guard table covers every flag the CLI reads',
+  tableBlock.length > 0 && uncoveredFlags.length === 0,
+  { uncoveredFlags, declaredCount: declaredFlags.size, readCount: readFlags.size }
 );
 } finally {
   await new Promise(resolveClose => server.close(resolveClose));

@@ -394,6 +394,138 @@ const CONFIRMATION_REQUIRED = new Set([
     'labels:delete'
 ]);
 
+// Every flag each command/subcommand accepts, read out of main() below.
+//
+// Per subcommand rather than per command so a flag that belongs to a sibling
+// (`notes list --category`) is rejected instead of ignored. Flags a command reads
+// before dispatching to a subcommand (--board, --stack in the cards/labels/stacks
+// blocks) are listed on every subcommand of that command, since they are valid
+// there.
+//
+// Keep in sync when adding a flag: test/regressions.mjs asserts this table covers
+// every flag the CLI reads.
+const FLAG_TABLE = {
+    addressbooks: {
+        list: '',
+    },
+    boards: {
+        create: '--color --title',
+        delete: '--board',
+        edit: '--archived --board --color --title',
+        get: '--board',
+        list: '',
+    },
+    calendar: {
+        create: '--calendar --description --description-file --end --location --start --summary',
+        delete: '--calendar --uid',
+        edit: '--calendar --description --description-file --end --location --start --summary --uid',
+        list: '--calendar --from --to',
+    },
+    calendars: {
+        list: '--type',
+    },
+    cards: {
+        'assign-label': '--board --card --label --stack',
+        'comment-add': '--board --card --message --message-file --stack',
+        'comment-delete': '--board --card --comment --stack',
+        'comment-list': '--board --card --stack',
+        create: '--board --card --description --description-file --duedate --order --stack --title',
+        delete: '--board --card --stack',
+        edit: '--archived --board --card --description --description-file --done --duedate --order --stack --title',
+        get: '--board --card --stack',
+        list: '--board --card --stack',
+        move: '--board --card --order --stack --to-stack',
+        'remove-label': '--board --card --label --stack',
+    },
+    contacts: {
+        create: '--addressbook --bday --email --name --note --note-file --organization --phone --title',
+        delete: '--addressbook --uid',
+        edit: '--addressbook --bday --email --name --note --note-file --organization --phone --title --uid',
+        get: '--addressbook --uid',
+        list: '--addressbook',
+        search: '--addressbook --query',
+    },
+    files: {
+        delete: '--path',
+        get: '--path',
+        list: '--path',
+        search: '--query',
+        upload: '--content --content-file --path',
+    },
+    labels: {
+        create: '--board --color --title',
+        delete: '--board --label',
+        edit: '--board --color --label --title',
+        list: '--board',
+    },
+    notes: {
+        create: '--category --content --content-file --title',
+        delete: '--id',
+        edit: '--category --content --content-file --id --title',
+        get: '--id',
+        list: '',
+    },
+    shares: {
+        'create-link': '--expire --password --password-file --path --permissions',
+        delete: '--id',
+        list: '--path',
+    },
+    stacks: {
+        create: '--board --order --title',
+        delete: '--board --stack',
+        edit: '--board --order --stack --title',
+        list: '--board',
+    },
+    tasks: {
+        complete: '--calendar --uid',
+        create: '--calendar --class --description --description-file --due --location --priority --start --tags --title --url',
+        delete: '--calendar --uid',
+        edit: '--calendar --class --description --description-file --due --location --percent-complete --priority --start --status --tags --title --uid --url',
+        list: '--calendar',
+    },
+};
+
+// Accepted on every command. requireExplicitConfirmation reads --confirm outside
+// any command block, so it is not in the table above.
+const GLOBAL_FLAGS = ['--confirm'];
+
+// Reject a flag the command does not accept, instead of ignoring it.
+//
+// An ignored flag is indistinguishable from success: `calendar list --calendar
+// <name>` returned every calendar, exited 0, and looked correct, which is how
+// issue #5 was closed as fixed while the flag still did nothing. A typo or a flag
+// left over from an older interface must fail loudly, and the message names what
+// the command does accept so the caller can correct it without a second round trip.
+//
+// Only flag position is checked, not required-ness: a missing --uid is reported by
+// the command itself with a message that says what is missing.
+function rejectUnknownFlags(args, command, subCommand) {
+    const table = FLAG_TABLE[command];
+    if (!table) return;
+    if (!(subCommand in table)) return;   // unknown subcommand: main() reports it
+
+    const allowed = new Set(
+        `${table[subCommand]} ${GLOBAL_FLAGS.join(' ')}`.split(' ').filter(Boolean)
+    );
+
+    // args[0] is the command and args[1] the subcommand, so scanning starts at 2.
+    // Every flag in this CLI takes exactly one value, so an accepted flag skips its
+    // value. That is also what keeps a value beginning with dashes (the frontmatter
+    // case, "---\ntitle: x" on --content) from being read as a flag.
+    for (let i = 2; i < args.length; i++) {
+        const arg = args[i];
+        if (!arg.startsWith('--')) continue;
+        if (allowed.has(arg)) {
+            i++;
+            continue;
+        }
+        throw new Error(
+            `Unknown option '${arg}' for '${command} ${subCommand}'. ` +
+            `Accepted: ${[...allowed].sort().join(', ')}`
+        );
+    }
+}
+
 // A flag that takes one value. An empty value is meaningful — on `tasks edit` it
 // clears the property — so it is returned as '', while the flag with no value at
 // all is a typo rather than a request to clear.
@@ -896,8 +1028,16 @@ const CalDAV = {
         }).filter(c => c && (!componentType || c.componentType === componentType));
     },
 
-    async getEvents(start, end) {
-        const calendars = await this.findCalendars('VEVENT');
+    async getEvents(start, end, calendarName = null) {
+        let calendars = await this.findCalendars('VEVENT');
+        if (calendarName) {
+            const matched = matchByName(calendars, calendarName);
+            if (!matched) {
+                const available = calendars.map(c => c.displayname).join(', ') || '(none)';
+                throw new Error(`Event-enabled calendar '${calendarName}' not found. Available: ${available}`);
+            }
+            calendars = [matched];
+        }
         const allEvents = [];
 
         const startStr = toCalDavDate(parseDateInput(start));
@@ -2341,6 +2481,7 @@ async function main() {
     const subCommand = args[1];
 
     try {
+        rejectUnknownFlags(args, command, subCommand);
         requireExplicitConfirmation(args, command, subCommand);
 
         if (command === 'notes') {
@@ -2429,9 +2570,11 @@ async function main() {
              if (subCommand === 'list') {
                 const fromIndex = args.indexOf('--from');
                 const toIndex = args.indexOf('--to');
+                const calIndex = args.indexOf('--calendar');
+                const calendar = calIndex !== -1 ? args[calIndex + 1] : null;
                 const start = fromIndex !== -1 ? args[fromIndex + 1] : formatISO(new Date());
                 const end = toIndex !== -1 ? args[toIndex + 1] : formatISO(addDays(new Date(), 7));
-                const result = await CalDAV.getEvents(start, end);
+                const result = await CalDAV.getEvents(start, end, calendar);
                 output(result);
             } else if (subCommand === 'create') {
                 const summaryIndex = args.indexOf('--summary');
