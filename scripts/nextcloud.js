@@ -18545,8 +18545,9 @@ var CalDAV = {
           const uidMatch = calData.match(/UID:(.*)/);
           const summaryMatch = calData.match(/SUMMARY:(.*)/);
           const descriptionMatch = unfolded.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
-          const dtstartMatch = calData.match(/DTSTART(?:;.*)?:(.*)/);
-          const dtendMatch = calData.match(/DTEND(?:;.*)?:(.*)/);
+          const veventBlock = (calData.match(/BEGIN:VEVENT\b([\s\S]*?)END:VEVENT/) || [null, calData])[1];
+          const dtstartMatch = veventBlock.match(/DTSTART(?:;[^:]*)?:(.*)/);
+          const dtendMatch = veventBlock.match(/DTEND(?:;[^:]*)?:(.*)/);
           const locationMatch = calData.match(/LOCATION:(.*)/);
           allEvents.push({
             uid: uidMatch ? uidMatch[1].trim() : "No UID",
