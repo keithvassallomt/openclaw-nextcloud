@@ -259,6 +259,45 @@ const timezoneTodoReport = todoMultistatus(todoResponse('timezone', timezoneTodo
 const allDayTodoReport = todoMultistatus(todoResponse('allday', allDayTodo));
 const metadataTodoReport = todoMultistatus(todoResponse('metadata', metadataTodo));
 
+// A one-off event as the Nextcloud Calendar web UI stores it: no RRULE, but a
+// VTIMEZONE whose DST rules carry DTSTART lines of their own, and a VALARM
+// with its own DESCRIPTION, both ahead of the event's. The event's DESCRIPTION
+// quotes "DTSTART:" and its SUMMARY is folded across two lines.
+const timezoneEvent = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//IDN nextcloud.com//Calendar app 4.7.0//EN
+BEGIN:VTIMEZONE
+TZID:Europe/Malta
+BEGIN:DAYLIGHT
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0200
+DTSTART:19700329T020000
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU
+END:DAYLIGHT
+BEGIN:STANDARD
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+DTSTART:19701025T030000
+RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:event-timezone
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Alarm description
+TRIGGER:-PT15M
+END:VALARM
+SUMMARY:Dentist appoint
+ ment
+DESCRIPTION:Moved from DTSTART:20260923T090000
+DTSTART;TZID=Europe/Malta:20260930T090000
+DTEND;TZID=Europe/Malta:20260930T100000
+END:VEVENT
+END:VCALENDAR`;
+
+const timezoneEventReport = todoMultistatus(todoResponse('timezone-event', timezoneEvent));
+
 // The timezoned task is in the list report too, so `tasks list` is exercised
 // against a VCALENDAR that carries DTSTART lines outside the VTODO.
 const todoListReport = todoReport.replace(
@@ -292,8 +331,10 @@ const server = http.createServer(async (req, res) => {
              req.url === '/remote.php/dav/calendars/tester/personal/') {
     res.setHeader('content-type', 'application/xml');
     // findTaskPath names the UID it is looking for in the query, so a fixture can
-    // be aimed at one test without changing what `tasks list` sees.
-    if (!body.includes('VTODO')) res.end(eventReport);
+    // be aimed at one test without changing what `tasks list` sees. `calendar
+    // list` names its window the same way.
+    if (body.includes('start="20260930T000000Z"')) res.end(timezoneEventReport);
+    else if (!body.includes('VTODO')) res.end(eventReport);
     else if (body.includes('task-timezone')) res.end(timezoneTodoReport);
     else if (body.includes('task-allday')) res.end(allDayTodoReport);
     else if (body.includes('task-metadata')) res.end(metadataTodoReport);
@@ -430,6 +471,36 @@ record(
     listedEvent?.description === 'Line one\nLine two' &&
     listedEvent?.location === 'Room; 2',
   { listedEvent, result }
+);
+
+// Every property was matched against the whole VCALENDAR, so a timezoned event
+// reported the VTIMEZONE's 1970 DST rule as its start, recurring or not.
+result = await run([
+  'calendar', 'list',
+  '--from', '2026-09-30T00:00:00Z',
+  '--to', '2026-10-01T00:00:00Z',
+  '--calendar', 'Personal'
+]);
+let timezoneEventListed = null;
+try {
+  timezoneEventListed = (JSON.parse(result.stdout)?.data ?? [])
+    .find(event => event.uid === 'event-timezone') ?? null;
+} catch {
+  // The assertion below preserves the parse failure as test evidence.
+}
+record(
+  'calendar list reports the event start, not a VTIMEZONE DST rule',
+  result.code === 0 &&
+    timezoneEventListed?.start === '20260930T090000' &&
+    timezoneEventListed?.end === '20260930T100000',
+  { timezoneEventListed, result }
+);
+record(
+  'calendar list reads the event\'s own text, unfolded, not a VALARM\'s',
+  result.code === 0 &&
+    timezoneEventListed?.summary === 'Dentist appointment' &&
+    timezoneEventListed?.description === 'Moved from DTSTART:20260923T090000',
+  { timezoneEventListed, result }
 );
 
 // --calendar on `calendar list` was accepted and ignored: the list branch read

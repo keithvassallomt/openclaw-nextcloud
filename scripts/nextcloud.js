@@ -18541,14 +18541,14 @@ var CalDAV = {
           const propstats = ensureArray(r["d:propstat"]);
           if (!propstats[0] || !propstats[0]["d:prop"]) continue;
           const calData = propstats[0]["d:prop"]["cal:calendar-data"];
-          const unfolded = calData.replace(/\r?\n[ \t]/g, "");
-          const uidMatch = calData.match(/UID:(.*)/);
-          const summaryMatch = calData.match(/SUMMARY:(.*)/);
-          const descriptionMatch = unfolded.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
-          const veventBlock = (calData.match(/BEGIN:VEVENT\b([\s\S]*?)END:VEVENT/) || [null, calData])[1];
-          const dtstartMatch = veventBlock.match(/DTSTART(?:;[^:]*)?:(.*)/);
-          const dtendMatch = veventBlock.match(/DTEND(?:;[^:]*)?:(.*)/);
-          const locationMatch = calData.match(/LOCATION:(.*)/);
+          const vevent = this._componentText(calData);
+          if (!vevent) continue;
+          const uidMatch = vevent.match(/^UID(?:;[^:]*)?:(.*)$/m);
+          const summaryMatch = vevent.match(/^SUMMARY(?:;[^:]*)?:(.*)$/m);
+          const descriptionMatch = vevent.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
+          const dtstartMatch = vevent.match(/^DTSTART(?:;[^:]*)?:(.*)$/m);
+          const dtendMatch = vevent.match(/^DTEND(?:;[^:]*)?:(.*)$/m);
+          const locationMatch = vevent.match(/^LOCATION(?:;[^:]*)?:(.*)$/m);
           allEvents.push({
             uid: uidMatch ? uidMatch[1].trim() : "No UID",
             calendar: cal.displayname,

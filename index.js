@@ -1075,19 +1075,19 @@ const CalDAV = {
                      if (!propstats[0] || !propstats[0]['d:prop']) continue;
                      
                      const calData = propstats[0]['d:prop']['cal:calendar-data'];
-                     const unfolded = calData.replace(/\r?\n[ \t]/g, '');
+                     // The VEVENT's own lines only. Any timezoned event carries a VTIMEZONE
+                     // whose DST rules have DTSTART lines of their own (dated 1970), and a
+                     // VALARM carries its own DESCRIPTION; an unscoped match finds whichever
+                     // comes first in the file.
+                     const vevent = this._componentText(calData);
+                     if (!vevent) continue;
 
-                     const uidMatch = calData.match(/UID:(.*)/);
-                                         const summaryMatch = calData.match(/SUMMARY:(.*)/);
-                                         const descriptionMatch = unfolded.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
-                                         // Only look at the VEVENT block. The VTIMEZONE component carries its own
-                                         // DTSTART (e.g. 19700329T020000), so matching the first DTSTART in the whole
-                                         // document returns that stale value for recurring events instead of the
-                                         // event's real start. This made weekly RRULE events report a 1970 start.
-                                         const veventBlock = (calData.match(/BEGIN:VEVENT\b([\s\S]*?)END:VEVENT/) || [null, calData])[1];
-                                         const dtstartMatch = veventBlock.match(/DTSTART(?:;[^:]*)?:(.*)/);
-                                         const dtendMatch = veventBlock.match(/DTEND(?:;[^:]*)?:(.*)/);
-                                         const locationMatch = calData.match(/LOCATION:(.*)/);
+                     const uidMatch = vevent.match(/^UID(?:;[^:]*)?:(.*)$/m);
+                     const summaryMatch = vevent.match(/^SUMMARY(?:;[^:]*)?:(.*)$/m);
+                     const descriptionMatch = vevent.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
+                     const dtstartMatch = vevent.match(/^DTSTART(?:;[^:]*)?:(.*)$/m);
+                     const dtendMatch = vevent.match(/^DTEND(?:;[^:]*)?:(.*)$/m);
+                     const locationMatch = vevent.match(/^LOCATION(?:;[^:]*)?:(.*)$/m);
 
                      allEvents.push({
                          uid: uidMatch ? uidMatch[1].trim() : 'No UID',
