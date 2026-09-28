@@ -1078,11 +1078,16 @@ const CalDAV = {
                      const unfolded = calData.replace(/\r?\n[ \t]/g, '');
 
                      const uidMatch = calData.match(/UID:(.*)/);
-                     const summaryMatch = calData.match(/SUMMARY:(.*)/);
-                     const descriptionMatch = unfolded.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
-                     const dtstartMatch = calData.match(/DTSTART(?:;.*)?:(.*)/);
-                     const dtendMatch = calData.match(/DTEND(?:;.*)?:(.*)/);
-                     const locationMatch = calData.match(/LOCATION:(.*)/);
+                                         const summaryMatch = calData.match(/SUMMARY:(.*)/);
+                                         const descriptionMatch = unfolded.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
+                                         // Only look at the VEVENT block. The VTIMEZONE component carries its own
+                                         // DTSTART (e.g. 19700329T020000), so matching the first DTSTART in the whole
+                                         // document returns that stale value for recurring events instead of the
+                                         // event's real start. This made weekly RRULE events report a 1970 start.
+                                         const veventBlock = (calData.match(/BEGIN:VEVENT\b([\s\S]*?)END:VEVENT/) || [null, calData])[1];
+                                         const dtstartMatch = veventBlock.match(/DTSTART(?:;[^:]*)?:(.*)/);
+                                         const dtendMatch = veventBlock.match(/DTEND(?:;[^:]*)?:(.*)/);
+                                         const locationMatch = calData.match(/LOCATION:(.*)/);
 
                      allEvents.push({
                          uid: uidMatch ? uidMatch[1].trim() : 'No UID',
