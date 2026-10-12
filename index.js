@@ -919,15 +919,37 @@ const Files = {
         const buffer = Buffer.from(await response.arrayBuffer());
 
         // --out writes the raw bytes to a file, which is the only lossless path:
-        // a JSON string cannot carry arbitrary bytes, so `content` is text-only
-        // and is offered for convenience on text files.
+        // a JSON string cannot carry arbitrary bytes. The bytes come from
+        // Nextcloud and are as untrusted as any retrieved content, so `wx`
+        // refuses to replace a file that already exists.
         if (out !== undefined) {
             const resolved = path.resolve(out);
-            fs.writeFileSync(resolved, buffer);
+            try {
+                fs.writeFileSync(resolved, buffer, { flag: 'wx' });
+            } catch (error) {
+                if (error.code === 'EEXIST') {
+                    throw new Error(
+                        `--out file already exists: ${out}. ` +
+                        'files get never overwrites a local file; choose a new path.'
+                    );
+                }
+                throw new Error(`Cannot write --out: ${error.message}`);
+            }
             return { path: filePath, out: resolved, size: buffer.length };
         }
 
-        return { path: filePath, content: buffer.toString('utf8'), size: buffer.length };
+        // Inline content is text only. A strict decode refuses bytes that are not
+        // valid UTF-8 instead of returning them as U+FFFD under a success status.
+        let content;
+        try {
+            content = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+        } catch {
+            throw new Error(
+                `${filePath} is not UTF-8 text and cannot be returned inline ` +
+                'without corrupting it. Use --out <file> to save the raw bytes.'
+            );
+        }
+        return { path: filePath, content, size: buffer.length };
     },
 
     async delete(filePath) {

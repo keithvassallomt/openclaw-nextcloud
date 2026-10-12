@@ -18410,10 +18410,27 @@ var Files = {
     const buffer = Buffer2.from(await response.arrayBuffer());
     if (out !== void 0) {
       const resolved = path.resolve(out);
-      fs.writeFileSync(resolved, buffer);
+      try {
+        fs.writeFileSync(resolved, buffer, { flag: "wx" });
+      } catch (error) {
+        if (error.code === "EEXIST") {
+          throw new Error(
+            `--out file already exists: ${out}. files get never overwrites a local file; choose a new path.`
+          );
+        }
+        throw new Error(`Cannot write --out: ${error.message}`);
+      }
       return { path: filePath, out: resolved, size: buffer.length };
     }
-    return { path: filePath, content: buffer.toString("utf8"), size: buffer.length };
+    let content;
+    try {
+      content = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+    } catch {
+      throw new Error(
+        `${filePath} is not UTF-8 text and cannot be returned inline without corrupting it. Use --out <file> to save the raw bytes.`
+      );
+    }
+    return { path: filePath, content, size: buffer.length };
   },
   async delete(filePath) {
     const decodedPath = sanitizePath(filePath);

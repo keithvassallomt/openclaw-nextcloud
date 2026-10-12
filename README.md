@@ -262,12 +262,16 @@ node scripts/nextcloud.js files list --path "Documents/"
 node scripts/nextcloud.js files upload --path "Documents/Reports/test.txt" \
   --content "Report contents"
 
-# Or read the content from a file
-node scripts/nextcloud.js files upload --path "Documents/Reports/test.txt" \
-  --content-file "/secure/input/test.txt"
+# Or read the content from a file (binary files are sent byte-for-byte)
+node scripts/nextcloud.js files upload --path "Documents/Reports/report.pdf" \
+  --content-file "/secure/input/report.pdf"
 
-# Download a file
+# Download a text file (returned inline; refused if the file is not UTF-8)
 node scripts/nextcloud.js files get --path "Documents/test.txt"
+
+# Download any file, binary included, to a local path (never overwrites)
+node scripts/nextcloud.js files get --path "Documents/report.pdf" \
+  --out "/secure/output/report.pdf"
 
 # Search for files
 node scripts/nextcloud.js files search --query "report"
@@ -495,7 +499,7 @@ This skill executes a bundled JavaScript file (`scripts/nextcloud.js`) on your m
 
 - The Nextcloud instance at `NEXTCLOUD_URL` — no other endpoints. There is no telemetry, no analytics, no auto-update, no third-party calls. You can confirm this by `grep -E 'fetch\(|http[s]?://' scripts/nextcloud.js`; every URL is built from `CONFIG.url` (i.e. `NEXTCLOUD_URL`) or relative API paths.
 - The environment variables `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_TOKEN`, and two optional ones: `NEXTCLOUD_EMAIL` (an address written into events you create, see [Configuration](#configuration)) and `OPENCLAW_ALLOW_HTTP` (the plaintext-HTTP opt-out). No other env vars are read; `grep -o 'process\.env\.[A-Z_]*' index.js` lists them.
-- No filesystem access beyond the Node module loader and the standard `fs` for reading inputs you pass it.
+- No filesystem access beyond the Node module loader, the standard `fs` for reading inputs you pass it, and writing the single file you name with `files get --out`. That write never replaces an existing file.
 
 **Credentials**
 

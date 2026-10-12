@@ -313,6 +313,8 @@ const downloadBytes = Buffer.concat([
   Buffer.from([0xff, 0xfe, 0x00, 0x80, 0x81]),
   Buffer.alloc(256).map((_, i) => i)
 ]);
+// Valid UTF-8 with a multi-byte character, served for `.txt` downloads.
+const downloadText = 'café menu\n';
 
 const server = http.createServer(async (req, res) => {
   const chunks = [];
@@ -326,8 +328,9 @@ const server = http.createServer(async (req, res) => {
 
   res.statusCode = 200;
   if (req.method === 'GET' && (req.url ?? '').startsWith('/remote.php/dav/files/tester/downloads/')) {
-    res.setHeader('content-type', 'application/octet-stream');
-    res.end(downloadBytes);
+    const isText = (req.url ?? '').endsWith('.txt');
+    res.setHeader('content-type', isText ? 'text/plain' : 'application/octet-stream');
+    res.end(isText ? downloadText : downloadBytes);
     return;
   }
   if (req.method === 'PROPFIND' &&
@@ -1432,8 +1435,8 @@ rmSync(fixtureDir, { recursive: true, force: true });
 //
 // `files get` used to read the body with response.text(), which decodes UTF-8
 // and replaces every non-UTF-8 byte with U+FFFD. --out writes the raw bytes, so
-// it is the byte-safe path; inline content stays text-only, because a JSON
-// string cannot carry arbitrary bytes.
+// it is the byte-safe path; inline content is text-only, because a JSON string
+// cannot carry arbitrary bytes, and is refused for anything that is not UTF-8.
 const downloadDir = mkdtempSync(join(tmpdir(), 'nc-download-'));
 const outFile = join(downloadDir, 'out.bin');
 
@@ -1461,14 +1464,44 @@ record(
   { reportedDownloadSize, expected: downloadBytes.length }
 );
 
-before = requests.length;
-result = await run(['files', 'get', '--path', 'downloads/blob.bin']);
-let inlineContent = null;
-try { inlineContent = JSON.parse(result.stdout)?.data?.content ?? null; } catch { /* asserted */ }
+// The bytes come from Nextcloud, so --out must never replace a local file.
+const existingFile = join(downloadDir, 'existing.txt');
+writeFileSync(existingFile, 'keep me');
+result = await run(['files', 'get', '--path', 'downloads/blob.bin', '--out', existingFile]);
 record(
-  'download without --out still returns inline content for text callers',
-  result.code === 0 && typeof inlineContent === 'string',
-  { inlineContentSample: typeof inlineContent === 'string' ? inlineContent.slice(0, 20) : null, result }
+  'download with --out refuses to overwrite an existing file',
+  result.code === 1 &&
+    result.stderr.includes('--out file already exists') &&
+    readFileSync(existingFile, 'utf8') === 'keep me',
+  { existing: readFileSync(existingFile, 'utf8'), result }
+);
+
+result = await run(['files', 'get', '--path', 'downloads/menu.txt']);
+let inlineContent = null;
+let inlineSize = null;
+try {
+  const data = JSON.parse(result.stdout)?.data;
+  inlineContent = data?.content ?? null;
+  inlineSize = data?.size ?? null;
+} catch { /* asserted */ }
+record(
+  'download without --out returns UTF-8 text inline',
+  result.code === 0 &&
+    inlineContent === downloadText &&
+    inlineSize === Buffer.byteLength(downloadText, 'utf8'),
+  { inlineContent, inlineSize, result }
+);
+
+// Inline content for a binary file used to come back as a success full of
+// U+FFFD. It is now an error that points at --out.
+result = await run(['files', 'get', '--path', 'downloads/blob.bin']);
+record(
+  'download without --out refuses content that is not UTF-8',
+  result.code === 1 &&
+    result.stdout === '' &&
+    result.stderr.includes('is not UTF-8 text') &&
+    result.stderr.includes('--out'),
+  { result }
 );
 
 rmSync(downloadDir, { recursive: true, force: true });

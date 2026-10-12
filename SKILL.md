@@ -162,8 +162,9 @@ the value does not appear in the process argument list:
 - `--password-file` instead of `--password`
 
 Each pair is mutually exclusive. Password files may be at most 16 KiB; other
-text input files may be at most 64 MiB. A single final newline is removed from
-password files.
+input files may be at most 64 MiB. A single final newline is removed from
+password files. `files upload --content-file` sends the file's bytes unchanged,
+so it works for binary files (PDFs, images, archives) as well as text.
 
 ## Commands
 
@@ -200,8 +201,10 @@ empty value (`--tags ""`) removes that property from the task.
 ### Files
 - `files list [--path <path>]`
 - `files search --query <q>`
-- `files get --path <path>` (download file content)
-- `files upload --path <path> (--content <content> | --content-file <file>)` — missing parent directories are created automatically
+- `files get --path <path> [--out <file>]` (download a file)
+  - Without `--out`, the content is returned inline as `content`. This works only for UTF-8 text; any other file is refused with an error that says to use `--out`.
+  - With `--out`, the raw bytes are written to that local path and the response gives `out` (the absolute path) and `size` instead of `content`. Use it for binary files. It never overwrites: if the path already exists the command fails, so pick a new path.
+- `files upload --path <path> (--content <content> | --content-file <file>)`: missing parent directories are created automatically, and `--content-file` may be binary
 - `files delete --path <path> --confirm files:delete`
 
 File listings and search results include a `fileId` (when the server returns one) and a synthesized `internalLink` of the form `<NEXTCLOUD_URL>/index.php/f/<fileId>` that opens the file in the Nextcloud web UI.
