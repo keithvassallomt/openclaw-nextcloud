@@ -1,7 +1,8 @@
 import http from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -306,9 +307,14 @@ const todoListReport = todoReport.replace(
 );
 
 const server = http.createServer(async (req, res) => {
-  let body = '';
-  for await (const chunk of req) body += chunk;
-  requests.push({ method: req.method, url: req.url, body });
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  // Keep the raw bytes as well as a string view. Concatenating into a string
+  // decodes each chunk as UTF-8, which turns any non-UTF-8 byte into U+FFFD and
+  // hides exactly the corruption the binary-upload tests exist to catch.
+  const rawBody = Buffer.concat(chunks);
+  const body = rawBody.toString('utf8');
+  requests.push({ method: req.method, url: req.url, body, rawBody });
 
   res.statusCode = 200;
   if (req.method === 'PROPFIND' &&
@@ -1301,6 +1307,113 @@ record(
     requests.at(-1)?.body.includes('--> not a flag'),
   { request: requests.at(-1), result }
 );
+
+// --- Files: binary-safe upload -----------------------------------------
+//
+// These pin the raw bytes that reach the server, not a string view of them: a
+// string comparison would reproduce the same UTF-8 mangling it is meant to
+// catch.
+const fixtureDir = mkdtempSync(join(tmpdir(), 'nc-upload-'));
+const binaryFixture = join(fixtureDir, 'fixture.bin');
+// Deliberately includes bytes that are invalid in UTF-8: the PNG magic, a 0xff
+// lone byte, 0xfe, and a truncated multi-byte lead 0x80/0x81.
+const binaryBytes = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  0x00, 0xff, 0xfe, 0x00, 0x80, 0x81, 0x42, 0x49, 0x4e
+]);
+writeFileSync(binaryFixture, binaryBytes);
+
+before = requests.length;
+result = await run([
+  'files', 'upload',
+  '--path', 'docs/fixture.bin',
+  '--content-file', binaryFixture
+]);
+const binaryPut = requests.slice(before).find(entry => entry.method === 'PUT');
+let reportedBinarySize = null;
+try {
+  reportedBinarySize = JSON.parse(result.stdout)?.data?.size ?? null;
+} catch {
+  // The assertion below preserves the parse failure as test evidence.
+}
+record(
+  'binary upload preserves the raw bytes (no UTF-8 mangling)',
+  result.code === 0 &&
+    binaryPut?.rawBody instanceof Buffer &&
+    binaryPut.rawBody.equals(binaryBytes),
+  {
+    sentHex: binaryPut?.rawBody?.toString('hex') ?? null,
+    expectedHex: binaryBytes.toString('hex'),
+    sentLength: binaryPut?.rawBody?.length ?? null,
+    result
+  }
+);
+record(
+  'binary upload reports the byte length, not a code-unit length',
+  reportedBinarySize === binaryBytes.length,
+  { reportedBinarySize, expected: binaryBytes.length }
+);
+
+// --- Files: text upload is unchanged -----------------------------------
+//
+// The text path must not regress: a plain ASCII file still round-trips
+// byte-for-byte and inline --content still works.
+const textFixture = join(fixtureDir, 'notes.txt');
+const textFixtureContent = 'line one\nline two\n';
+writeFileSync(textFixture, textFixtureContent);
+
+before = requests.length;
+result = await run([
+  'files', 'upload',
+  '--path', 'docs/notes.txt',
+  '--content-file', textFixture
+]);
+const textPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'text upload via --content-file is byte-identical',
+  result.code === 0 &&
+    textPut?.rawBody?.equals(Buffer.from(textFixtureContent, 'utf8')),
+  { sent: textPut?.rawBody?.toString('utf8') ?? null, result }
+);
+
+// A non-ASCII character (é = 2 UTF-8 bytes, 1 UTF-16 code unit). The old code
+// reported size via `.length`, so this file was described as smaller than it is.
+const multibyteFixture = join(fixtureDir, 'cafe.txt');
+const multibyteContent = 'caf\u00e9\n';
+writeFileSync(multibyteFixture, multibyteContent);
+before = requests.length;
+result = await run([
+  'files', 'upload',
+  '--path', 'docs/cafe.txt',
+  '--content-file', multibyteFixture
+]);
+let reportedMultibyteSize = null;
+try {
+  reportedMultibyteSize = JSON.parse(result.stdout)?.data?.size ?? null;
+} catch {
+  // asserted below
+}
+record(
+  'non-ASCII text upload reports byte length, not string length',
+  result.code === 0 && reportedMultibyteSize === Buffer.byteLength(multibyteContent, 'utf8'),
+  { reportedMultibyteSize, expected: Buffer.byteLength(multibyteContent, 'utf8') }
+);
+
+before = requests.length;
+result = await run([
+  'files', 'upload',
+  '--path', 'docs/inline.txt',
+  '--content', 'hello inline'
+]);
+const inlinePut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'inline --content still uploads as UTF-8 text',
+  result.code === 0 &&
+    inlinePut?.rawBody?.equals(Buffer.from('hello inline', 'utf8')),
+  { sent: inlinePut?.rawBody?.toString('utf8') ?? null, result }
+);
+
+rmSync(fixtureDir, { recursive: true, force: true });
 
 // The guard's table must match the flags the CLI actually reads, in both
 // directions: a flag missing from the table would be rejected, and a flag in the

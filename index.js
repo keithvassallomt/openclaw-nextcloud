@@ -541,7 +541,8 @@ function getOptionValue(args, flag) {
 function readTextOption(args, inlineFlag, fileFlag, {
     required = false,
     stripFinalNewline = false,
-    maxBytes = MAX_TEXT_INPUT_BYTES
+    maxBytes = MAX_TEXT_INPUT_BYTES,
+    binary = false
 } = {}) {
     const inlineValue = getOptionValue(args, inlineFlag);
     const filePath = getOptionValue(args, fileFlag);
@@ -553,7 +554,9 @@ function readTextOption(args, inlineFlag, fileFlag, {
         if (required && inlineValue.length === 0) {
             throw new Error(`${inlineFlag} must not be empty.`);
         }
-        return inlineValue;
+        // Inline values arrive as strings; for byte-oriented callers encode them
+        // as UTF-8 so the length and the bytes sent are the same thing.
+        return binary ? Buffer.from(inlineValue, 'utf8') : inlineValue;
     }
     if (filePath === undefined) {
         if (required) throw new Error(`Missing ${inlineFlag} or ${fileFlag}`);
@@ -577,8 +580,15 @@ function readTextOption(args, inlineFlag, fileFlag, {
         throw new Error(`${fileFlag} exceeds the ${maxBytes}-byte safety limit.`);
     }
 
-    let value = fs.readFileSync(resolvedPath, 'utf8');
-    if (stripFinalNewline) value = value.replace(/\r?\n$/, '');
+    // Binary callers get the raw bytes: decoding as UTF-8 would replace every
+    // byte that is not valid UTF-8 with U+FFFD, silently corrupting the file.
+    let value;
+    if (binary) {
+        value = fs.readFileSync(resolvedPath);
+    } else {
+        value = fs.readFileSync(resolvedPath, 'utf8');
+        if (stripFinalNewline) value = value.replace(/\r?\n$/, '');
+    }
     if (required && value.length === 0) {
         throw new Error(`${fileFlag} must not be empty.`);
     }
@@ -878,7 +888,12 @@ const Files = {
             rawBody: true
         });
 
-        return { path: filePath, status: 'uploaded', size: content.length };
+        // Bytes actually sent. `.length` on a string is a UTF-16 code-unit
+        // count, which undershoots any multi-byte character.
+        const size = Buffer.isBuffer(content)
+            ? content.length
+            : Buffer.byteLength(content, 'utf8');
+        return { path: filePath, status: 'uploaded', size };
     },
 
     async get(filePath) {
@@ -2554,8 +2569,11 @@ async function main() {
                 if (pathIndex === -1) throw new Error('Missing --path');
                 const filePath = args[pathIndex + 1];
 
+                // Binary-safe: `--content-file` is read as raw bytes so PDFs,
+                // images and archives survive the round trip. Inline `--content`
+                // is still a UTF-8 string, encoded to bytes here.
                 const content = readTextOption(
-                    args, '--content', '--content-file', { required: true }
+                    args, '--content', '--content-file', { required: true, binary: true }
                 );
 
                 output(await Files.upload(filePath, content));

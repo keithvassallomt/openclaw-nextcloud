@@ -18107,7 +18107,8 @@ function getOptionValue(args, flag) {
 function readTextOption(args, inlineFlag, fileFlag, {
   required = false,
   stripFinalNewline = false,
-  maxBytes = MAX_TEXT_INPUT_BYTES
+  maxBytes = MAX_TEXT_INPUT_BYTES,
+  binary = false
 } = {}) {
   const inlineValue = getOptionValue(args, inlineFlag);
   const filePath = getOptionValue(args, fileFlag);
@@ -18118,7 +18119,7 @@ function readTextOption(args, inlineFlag, fileFlag, {
     if (required && inlineValue.length === 0) {
       throw new Error(`${inlineFlag} must not be empty.`);
     }
-    return inlineValue;
+    return binary ? Buffer2.from(inlineValue, "utf8") : inlineValue;
   }
   if (filePath === void 0) {
     if (required) throw new Error(`Missing ${inlineFlag} or ${fileFlag}`);
@@ -18140,8 +18141,13 @@ function readTextOption(args, inlineFlag, fileFlag, {
   if (stat.size > maxBytes) {
     throw new Error(`${fileFlag} exceeds the ${maxBytes}-byte safety limit.`);
   }
-  let value = fs.readFileSync(resolvedPath, "utf8");
-  if (stripFinalNewline) value = value.replace(/\r?\n$/, "");
+  let value;
+  if (binary) {
+    value = fs.readFileSync(resolvedPath);
+  } else {
+    value = fs.readFileSync(resolvedPath, "utf8");
+    if (stripFinalNewline) value = value.replace(/\r?\n$/, "");
+  }
   if (required && value.length === 0) {
     throw new Error(`${fileFlag} must not be empty.`);
   }
@@ -18383,7 +18389,8 @@ var Files = {
       body: content,
       rawBody: true
     });
-    return { path: filePath, status: "uploaded", size: content.length };
+    const size = Buffer2.isBuffer(content) ? content.length : Buffer2.byteLength(content, "utf8");
+    return { path: filePath, status: "uploaded", size };
   },
   async get(filePath) {
     const decodedPath = sanitizePath(filePath);
@@ -19826,7 +19833,7 @@ async function main() {
           args,
           "--content",
           "--content-file",
-          { required: true }
+          { required: true, binary: true }
         );
         output(await Files.upload(filePath, content));
       } else if (subCommand === "get") {
