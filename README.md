@@ -44,45 +44,6 @@ cd openclaw-nextcloud
 
 The skill is pre-bundled with all dependencies in `scripts/nextcloud.js` - no npm install required.
 
-## Upgrading to 0.4.0
-
-**0.4.0 contains a breaking change.** Eleven irreversible operations now refuse
-to run unless the command includes a matching `--confirm <command>:<subcommand>`
-token:
-
-- `notes delete` → `--confirm notes:delete`
-- `files delete` → `--confirm files:delete`
-- `tasks delete` → `--confirm tasks:delete`
-- `calendar delete` → `--confirm calendar:delete`
-- `contacts delete` → `--confirm contacts:delete`
-- `boards delete` → `--confirm boards:delete`
-- `stacks delete` → `--confirm stacks:delete`
-- `cards delete` → `--confirm cards:delete`
-- `labels delete` → `--confirm labels:delete`
-- `shares delete` → `--confirm shares:delete`
-- `shares create-link` → `--confirm shares:create-link`
-
-```bash
-# 0.3.0
-node scripts/nextcloud.js notes delete --id 123
-
-# 0.4.0
-node scripts/nextcloud.js notes delete --id 123 --confirm notes:delete
-```
-
-Everything else is unchanged — all reads, all creates, and every `edit`, plus
-`files upload`, `cards move` and `cards comment-delete`, work exactly as before.
-
-Agents pick this up automatically, since `SKILL.md` ships alongside the bundle
-and is read on invocation. **Shell scripts and cron jobs that call the eleven
-commands above will break until the token is added**, as they never re-read
-`SKILL.md`.
-
-Also in 0.4.0: text and secrets can be supplied from a file instead of the
-command line (`--content-file`, `--description-file`, `--note-file`,
-`--message-file`, `--password-file`), keeping them out of the process argument
-list where `ps` can read them. Prefer `--password-file` for share passwords.
-
 ## Development
 
 The project uses a bundled architecture:
@@ -545,12 +506,20 @@ If the diff is non-empty, the committed bundle does not match the source — ple
 
 Thanks to:
 
-- [@schemann](https://github.com/schemann) — `fileId` / `internalLink` on file listings, auto-MKCOL on upload, public-link shares (`shares list` / `create-link` / `delete`).
-- [@KssimiClaw](https://github.com/KssimiClaw) — fix for `files search` 501 by routing the WebDAV `SEARCH` request to the DAV root.
-- [@makefu](https://github.com/makefu) — Kanban Boards support.
-- [@bolinches](https://github.com/bolinches) — fix for secondary calendars advertising multiple component types being dropped from event/task operations, and vCard 3.0 group prefix handling (`item1.EMAIL`, `item2.TEL`) in the contact parser.
-- [@sam2kb](https://github.com/sam2kb) — security review and the fixes behind 0.4.0: WebDAV path traversal, iCalendar/vCard value escaping and unescaping, `PRIORITY` injection, confirmation tokens for irreversible operations, file-backed text and secret inputs, `skillKey` config stability, and the project's first test suites.
-- [@kens-agents](https://github.com/kens-agents) — fix for `tasks list` hiding tasks created in the Nextcloud Tasks web app, which omit `STATUS`: per RFC 4791 §3.6.4 the CalDAV `prop-filter` only matched VTODOs that declare the property; and fix for Deck `boards`/`stacks`/`cards`/`labels` `delete` returning 403 without a JSON content type on the request. Discovered and reproduced by [@kendawson-online](https://github.com/kendawson-online).
+- [@schemann](https://github.com/schemann): `fileId` / `internalLink` on file listings, auto-MKCOL on upload, public-link shares (`shares list` / `create-link` / `delete`).
+- [@KssimiClaw](https://github.com/KssimiClaw): fix for `files search` 501 by routing the WebDAV `SEARCH` request to the DAV root.
+- [@makefu](https://github.com/makefu): Kanban Boards support.
+- [@bolinches](https://github.com/bolinches), the project's most prolific contributor, with eight merged PRs:
+  - Secondary calendars that advertise more than one component type are no longer dropped from event and task operations ([#6](https://github.com/keithvassallomt/openclaw-nextcloud/pull/6)).
+  - vCard 3.0 group prefixes (`item1.EMAIL`, `item2.TEL`) are handled in the contact parser ([#9](https://github.com/keithvassallomt/openclaw-nextcloud/pull/9)).
+  - Events are created as confirmed, with the user as organiser and an accepted attendee, when `NEXTCLOUD_EMAIL` is set ([#17](https://github.com/keithvassallomt/openclaw-nextcloud/pull/17)).
+  - The CLI usage string points at the bundled `scripts/nextcloud.js` ([#20](https://github.com/keithvassallomt/openclaw-nextcloud/pull/20)).
+  - Contact birthdays via `--bday`, accepting full, compact and year-less dates, with validation that blocks property injection ([#22](https://github.com/keithvassallomt/openclaw-nextcloud/pull/22)).
+  - `calendar list --calendar` scopes the listing instead of silently ignoring the flag, and every command now rejects flags it does not accept ([#23](https://github.com/keithvassallomt/openclaw-nextcloud/pull/23)).
+  - Binary-safe file transfer: `files upload` sends files byte-for-byte ([#25](https://github.com/keithvassallomt/openclaw-nextcloud/pull/25)) and `files get --out` downloads them the same way ([#26](https://github.com/keithvassallomt/openclaw-nextcloud/pull/26)).
+- [@sam2kb](https://github.com/sam2kb): security review and the fixes behind 0.4.0, covering WebDAV path traversal, iCalendar/vCard value escaping and unescaping, `PRIORITY` injection, confirmation tokens for irreversible operations, file-backed text and secret inputs, `skillKey` config stability, and the project's first test suites.
+- [@kens-agents](https://github.com/kens-agents): optional task metadata on `tasks create` and `tasks edit` (`--start`, `--location`, `--url`, `--class`, `--tags`, `--status`, `--percent-complete`), including a fix for due and start dates written in local time under a UTC `Z` suffix; fix for `tasks list` hiding tasks created in the Nextcloud Tasks web app, which omit `STATUS`: per RFC 4791 §3.6.4 the CalDAV `prop-filter` only matched VTODOs that declare the property; and fix for Deck `boards`/`stacks`/`cards`/`labels` `delete` returning 403 without a JSON content type on the request. Discovered and reproduced by [@kendawson-online](https://github.com/kendawson-online).
+- [@wu07sn](https://github.com/wu07sn): fix for `calendar list` reporting a 1970 start for events with a local time, by reading `DTSTART` from the VEVENT instead of the first one in the file, which belongs to the VTIMEZONE.
 
 ## License
 
