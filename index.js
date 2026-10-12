@@ -447,7 +447,7 @@ const FLAG_TABLE = {
     },
     files: {
         delete: '--path',
-        get: '--path',
+        get: '--out --path',
         list: '--path',
         search: '--query',
         upload: '--content --content-file --path',
@@ -896,7 +896,7 @@ const Files = {
         return { path: filePath, status: 'uploaded', size };
     },
 
-    async get(filePath) {
+    async get(filePath, out) {
         const decodedPath = sanitizePath(filePath);
         const relPath = decodedPath.replace(/^\/+/, '');
         if (!relPath) throw new Error('File path must be non-empty.');
@@ -914,8 +914,20 @@ const Files = {
             throw new Error(`Request failed: HTTP ${response.status}: ${response.statusText}`);
         }
 
-        const content = await response.text();
-        return { path: filePath, content, size: content.length };
+        // Read the body as bytes. response.text() decodes as UTF-8 and replaces
+        // every non-UTF-8 byte with U+FFFD, corrupting any binary download.
+        const buffer = Buffer.from(await response.arrayBuffer());
+
+        // --out writes the raw bytes to a file, which is the only lossless path:
+        // a JSON string cannot carry arbitrary bytes, so `content` is text-only
+        // and is offered for convenience on text files.
+        if (out !== undefined) {
+            const resolved = path.resolve(out);
+            fs.writeFileSync(resolved, buffer);
+            return { path: filePath, out: resolved, size: buffer.length };
+        }
+
+        return { path: filePath, content: buffer.toString('utf8'), size: buffer.length };
     },
 
     async delete(filePath) {
@@ -2580,7 +2592,7 @@ async function main() {
             } else if (subCommand === 'get') {
                 const pathIndex = args.indexOf('--path');
                 if (pathIndex === -1) throw new Error('Missing --path');
-                output(await Files.get(args[pathIndex + 1]));
+                output(await Files.get(args[pathIndex + 1], getOptionValue(args, '--out')));
             } else if (subCommand === 'delete') {
                 const pathIndex = args.indexOf('--path');
                 if (pathIndex === -1) throw new Error('Missing --path');

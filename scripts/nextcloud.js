@@ -18038,7 +18038,7 @@ var FLAG_TABLE = {
   },
   files: {
     delete: "--path",
-    get: "--path",
+    get: "--out --path",
     list: "--path",
     search: "--query",
     upload: "--content --content-file --path"
@@ -18392,7 +18392,7 @@ var Files = {
     const size = Buffer2.isBuffer(content) ? content.length : Buffer2.byteLength(content, "utf8");
     return { path: filePath, status: "uploaded", size };
   },
-  async get(filePath) {
+  async get(filePath, out) {
     const decodedPath = sanitizePath(filePath);
     const relPath = decodedPath.replace(/^\/+/, "");
     if (!relPath) throw new Error("File path must be non-empty.");
@@ -18407,8 +18407,13 @@ var Files = {
     if (!response.ok) {
       throw new Error(`Request failed: HTTP ${response.status}: ${response.statusText}`);
     }
-    const content = await response.text();
-    return { path: filePath, content, size: content.length };
+    const buffer = Buffer2.from(await response.arrayBuffer());
+    if (out !== void 0) {
+      const resolved = path.resolve(out);
+      fs.writeFileSync(resolved, buffer);
+      return { path: filePath, out: resolved, size: buffer.length };
+    }
+    return { path: filePath, content: buffer.toString("utf8"), size: buffer.length };
   },
   async delete(filePath) {
     const decodedPath = sanitizePath(filePath);
@@ -19839,7 +19844,7 @@ async function main() {
       } else if (subCommand === "get") {
         const pathIndex = args.indexOf("--path");
         if (pathIndex === -1) throw new Error("Missing --path");
-        output(await Files.get(args[pathIndex + 1]));
+        output(await Files.get(args[pathIndex + 1], getOptionValue(args, "--out")));
       } else if (subCommand === "delete") {
         const pathIndex = args.indexOf("--path");
         if (pathIndex === -1) throw new Error("Missing --path");
