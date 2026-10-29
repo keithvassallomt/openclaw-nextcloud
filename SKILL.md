@@ -314,12 +314,15 @@ Date inputs (`--due`, `--start`, `--end`, `--from`, `--to`) accept either ISO 86
       "summary": "Event title",
       "start": "20260205T100000Z",
       "end": "20260205T110000Z",
-      "location": "Conference Room B"
+      "location": "Conference Room B",
+      "recurrenceId": null
     }
   ]
 }
 ```
 - `location`: free-text location string or null
+- Events are sorted by `start`. A recurring event is listed once per occurrence in the window, each with its own `start` and `end`.
+- `recurrenceId`: set on each occurrence of a recurring event, null for a one-off. Every occurrence shares the series `uid`, so `calendar edit` and `calendar delete` change or remove the whole series, not one occurrence.
 
 ### Shares Output
 ```json

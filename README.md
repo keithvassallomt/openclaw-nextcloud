@@ -520,6 +520,7 @@ Thanks to:
 - [@sam2kb](https://github.com/sam2kb): security review and the fixes behind 0.4.0, covering WebDAV path traversal, iCalendar/vCard value escaping and unescaping, `PRIORITY` injection, confirmation tokens for irreversible operations, file-backed text and secret inputs, `skillKey` config stability, and the project's first test suites.
 - [@kens-agents](https://github.com/kens-agents): optional task metadata on `tasks create` and `tasks edit` (`--start`, `--location`, `--url`, `--class`, `--tags`, `--status`, `--percent-complete`), including a fix for due and start dates written in local time under a UTC `Z` suffix; fix for `tasks list` hiding tasks created in the Nextcloud Tasks web app, which omit `STATUS`: per RFC 4791 §3.6.4 the CalDAV `prop-filter` only matched VTODOs that declare the property; and fix for Deck `boards`/`stacks`/`cards`/`labels` `delete` returning 403 without a JSON content type on the request. Discovered and reproduced by [@kendawson-online](https://github.com/kendawson-online).
 - [@wu07sn](https://github.com/wu07sn): fix for `calendar list` reporting a 1970 start for events with a local time, by reading `DTSTART` from the VEVENT instead of the first one in the file, which belongs to the VTIMEZONE.
+- [@flusteredfognozzle](https://github.com/flusteredfognozzle): report and diagnosis of `calendar list` showing a recurring event only as its first occurrence, months in the past, with nothing to say it repeats ([#27](https://github.com/keithvassallomt/openclaw-nextcloud/issues/27)).
 
 ## License
 

@@ -299,6 +299,80 @@ END:VCALENDAR`;
 
 const timezoneEventReport = todoMultistatus(todoResponse('timezone-event', timezoneEvent));
 
+// A weekly event as stored: one VEVENT for the series, starting in February,
+// with the 9 November occurrence cancelled by an EXDATE, and a second VEVENT
+// moving the 16 November occurrence an hour later.
+const storedRecurringEvent = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//IDN nextcloud.com//Calendar app 4.7.0//EN
+BEGIN:VEVENT
+UID:event-weekly
+SUMMARY:Choir practice
+DTSTART;TZID=Europe/Malta:20260209T170000
+DTEND;TZID=Europe/Malta:20260209T180000
+RRULE:FREQ=WEEKLY;UNTIL=20261221T225959Z
+EXDATE;TZID=Europe/Malta:20261109T170000
+END:VEVENT
+BEGIN:VEVENT
+UID:event-weekly
+RECURRENCE-ID;TZID=Europe/Malta:20261116T170000
+SUMMARY:Choir practice
+DTSTART;TZID=Europe/Malta:20261116T180000
+DTEND;TZID=Europe/Malta:20261116T190000
+END:VEVENT
+END:VCALENDAR`;
+
+// The same event as Nextcloud returns it when asked to expand a window: one
+// VEVENT per occurrence, each with a RECURRENCE-ID, the EXDATE and the move
+// applied, and every time in UTC. The expansion is re-serialized with CRLF line
+// endings, and the CR arrives in the XML as &#13;.
+const expandedRecurringEvent = `BEGIN:VCALENDAR
+VERSION:2.0
+CALSCALE:GREGORIAN
+PRODID:-//Sabre//Sabre VObject 4.5.6//EN
+BEGIN:VEVENT
+UID:event-weekly
+SUMMARY:Choir practice
+DTSTART:20261102T160000Z
+DTEND:20261102T170000Z
+RECURRENCE-ID:20261102T160000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:event-weekly
+SUMMARY:Choir practice
+DTSTART:20261116T170000Z
+DTEND:20261116T180000Z
+RECURRENCE-ID:20261116T160000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:event-weekly
+SUMMARY:Choir practice
+DTSTART:20261123T160000Z
+DTEND:20261123T170000Z
+RECURRENCE-ID:20261123T160000Z
+END:VEVENT
+END:VCALENDAR
+`.replace(/\n/g, '&#13;\n');
+
+// A one-off event ahead of the series in the response but between its
+// occurrences in time.
+const oneOffEvent = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:event-oneoff
+SUMMARY:Haircut
+DTSTART:20261110T090000Z
+DTEND:20261110T093000Z
+END:VEVENT
+END:VCALENDAR`;
+
+const storedRecurringReport = todoMultistatus(
+  todoResponse('oneoff', oneOffEvent) + todoResponse('weekly', storedRecurringEvent)
+);
+const expandedRecurringReport = todoMultistatus(
+  todoResponse('oneoff', oneOffEvent) + todoResponse('weekly', expandedRecurringEvent)
+);
+
 // The timezoned task is in the list report too, so `tasks list` is exercised
 // against a VCALENDAR that carries DTSTART lines outside the VTODO.
 const todoListReport = todoReport.replace(
@@ -356,7 +430,9 @@ const server = http.createServer(async (req, res) => {
     // be aimed at one test without changing what `tasks list` sees. `calendar
     // list` names its window the same way.
     if (body.includes('start="20260930T000000Z"')) res.end(timezoneEventReport);
-    else if (!body.includes('VTODO')) res.end(eventReport);
+    else if (body.includes('start="20261102T000000Z"')) {
+      res.end(/:expand\b/.test(body) ? expandedRecurringReport : storedRecurringReport);
+    } else if (!body.includes('VTODO')) res.end(eventReport);
     else if (body.includes('task-timezone')) res.end(timezoneTodoReport);
     else if (body.includes('task-allday')) res.end(allDayTodoReport);
     else if (body.includes('task-metadata')) res.end(metadataTodoReport);
@@ -482,7 +558,8 @@ result = await run([
 ]);
 let listedEvent = null;
 try {
-  listedEvent = JSON.parse(result.stdout)?.data?.[0] ?? null;
+  listedEvent = (JSON.parse(result.stdout)?.data ?? [])
+    .find(event => event.uid === 'event-1') ?? null;
 } catch {
   // The assertion below preserves the parse failure as test evidence.
 }
@@ -523,6 +600,41 @@ record(
     timezoneEventListed?.summary === 'Dentist appointment' &&
     timezoneEventListed?.description === 'Moved from DTSTART:20260923T090000',
   { timezoneEventListed, result }
+);
+
+// The time-range filter matched a recurring event by its occurrences in the
+// window, but `calendar list` reported the stored VEVENT: the first occurrence,
+// months earlier, with nothing to say the event repeats (#27).
+before = requests.length;
+result = await run([
+  'calendar', 'list',
+  '--from', '2026-11-02T00:00:00Z',
+  '--to', '2026-11-24T00:00:00Z',
+  '--calendar', 'Personal'
+]);
+const recurringQuery = requests.slice(before).find(r => r.method === 'REPORT');
+let recurringListed = [];
+try {
+  recurringListed = JSON.parse(result.stdout)?.data ?? [];
+} catch {
+  // The assertion below preserves the parse failure as test evidence.
+}
+record(
+  'calendar list asks the server to expand recurring events over the window',
+  /<c:expand start="20261102T000000Z" end="20261124T000000Z"\s*\/>/.test(recurringQuery?.body ?? ''),
+  { body: recurringQuery?.body }
+);
+record(
+  'calendar list reports every occurrence in the window, in order',
+  result.code === 0 &&
+    JSON.stringify(recurringListed.map(e => [e.uid, e.start, e.end, e.recurrenceId])) ===
+      JSON.stringify([
+        ['event-weekly', '20261102T160000Z', '20261102T170000Z', '20261102T160000Z'],
+        ['event-oneoff', '20261110T090000Z', '20261110T093000Z', null],
+        ['event-weekly', '20261116T170000Z', '20261116T180000Z', '20261116T160000Z'],
+        ['event-weekly', '20261123T160000Z', '20261123T170000Z', '20261123T160000Z']
+      ]),
+  { recurringListed, result }
 );
 
 // --calendar on `calendar list` was accepted and ignored: the list branch read

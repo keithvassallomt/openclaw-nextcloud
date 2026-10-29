@@ -105,7 +105,12 @@ const AUTH_HEADER = 'Basic ' + Buffer.from(`${CONFIG.user}:${CONFIG.token}`).toS
 // XML Parser
 const parser = new XMLParser({
     ignoreAttributes: false,
-    attributeNamePrefix: "@_"
+    attributeNamePrefix: "@_",
+    // Decode numeric character references. Nextcloud writes the CR of a CRLF
+    // line ending as &#13;, which the parser otherwise leaves in the text: an
+    // expanded calendar-data block then has no line that reads BEGIN:VEVENT.
+    // &amp; is still decoded last, so escaped text is not decoded twice.
+    htmlEntities: true
 });
 
 // --- Helpers ---
@@ -1091,11 +1096,18 @@ const CalDAV = {
         const startStr = toCalDavDate(parseDateInput(start));
         const endStr = toCalDavDate(parseDateInput(end));
 
+        // The time-range filter matches a recurring event by any occurrence in the
+        // window, but the stored VEVENT holds only the first one and its RRULE.
+        // Asking the server to expand (RFC 4791 9.6.5) returns each occurrence in
+        // the window as a VEVENT of its own, with EXDATEs and moved occurrences
+        // applied, and every time of day in UTC.
         const body = `
             <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
                 <d:prop>
                     <d:getetag />
-                    <c:calendar-data />
+                    <c:calendar-data>
+                        <c:expand start="${startStr}" end="${endStr}" />
+                    </c:calendar-data>
                 </d:prop>
                 <c:filter>
                     <c:comp-filter name="VCALENDAR">
@@ -1124,35 +1136,40 @@ const CalDAV = {
                      if (!propstats[0] || !propstats[0]['d:prop']) continue;
                      
                      const calData = propstats[0]['d:prop']['cal:calendar-data'];
-                     // The VEVENT's own lines only. Any timezoned event carries a VTIMEZONE
+                     // Each VEVENT's own lines only. Any timezoned event carries a VTIMEZONE
                      // whose DST rules have DTSTART lines of their own (dated 1970), and a
                      // VALARM carries its own DESCRIPTION; an unscoped match finds whichever
                      // comes first in the file.
-                     const vevent = this._componentText(calData);
-                     if (!vevent) continue;
+                     for (const vevent of this._componentTexts(calData)) {
+                         const uidMatch = vevent.match(/^UID(?:;[^:]*)?:(.*)$/m);
+                         const summaryMatch = vevent.match(/^SUMMARY(?:;[^:]*)?:(.*)$/m);
+                         const descriptionMatch = vevent.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
+                         const dtstartMatch = vevent.match(/^DTSTART(?:;[^:]*)?:(.*)$/m);
+                         const dtendMatch = vevent.match(/^DTEND(?:;[^:]*)?:(.*)$/m);
+                         const locationMatch = vevent.match(/^LOCATION(?:;[^:]*)?:(.*)$/m);
+                         const recurrenceIdMatch = vevent.match(/^RECURRENCE-ID(?:;[^:]*)?:(.*)$/m);
 
-                     const uidMatch = vevent.match(/^UID(?:;[^:]*)?:(.*)$/m);
-                     const summaryMatch = vevent.match(/^SUMMARY(?:;[^:]*)?:(.*)$/m);
-                     const descriptionMatch = vevent.match(/^DESCRIPTION(?:;[^:]*)?:(.*)$/m);
-                     const dtstartMatch = vevent.match(/^DTSTART(?:;[^:]*)?:(.*)$/m);
-                     const dtendMatch = vevent.match(/^DTEND(?:;[^:]*)?:(.*)$/m);
-                     const locationMatch = vevent.match(/^LOCATION(?:;[^:]*)?:(.*)$/m);
-
-                     allEvents.push({
-                         uid: uidMatch ? uidMatch[1].trim() : 'No UID',
-                         calendar: cal.displayname,
-                         summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : 'No Title',
-                         description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
-                         start: dtstartMatch ? dtstartMatch[1].trim() : 'Unknown',
-                         end: dtendMatch ? dtendMatch[1].trim() : null,
-                         location: locationMatch ? unescapePropertyValue(locationMatch[1].trim()) : null
-                     });
+                         allEvents.push({
+                             uid: uidMatch ? uidMatch[1].trim() : 'No UID',
+                             calendar: cal.displayname,
+                             summary: summaryMatch ? unescapePropertyValue(summaryMatch[1].trim()) : 'No Title',
+                             description: descriptionMatch ? unescapePropertyValue(descriptionMatch[1].trim()) : null,
+                             start: dtstartMatch ? dtstartMatch[1].trim() : 'Unknown',
+                             end: dtendMatch ? dtendMatch[1].trim() : null,
+                             location: locationMatch ? unescapePropertyValue(locationMatch[1].trim()) : null,
+                             // Set on every occurrence of a recurring event, and only there.
+                             recurrenceId: recurrenceIdMatch ? recurrenceIdMatch[1].trim() : null
+                         });
+                     }
                  }
              } catch (e) {
                  // ignore errors for specific calendars
              }
         }
-        return allEvents;
+        // Occurrences of one recurring event arrive together, so without this the
+        // next thing on the calendar is not necessarily first. Compact UTC values
+        // sort as text, and an all-day date sorts ahead of times on that day.
+        return allEvents.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
     },
 
     async getTodos(calendarName = null) {
@@ -1351,11 +1368,11 @@ const CalDAV = {
     // VTIMEZONE carries DTSTART lines of its own (the DST rules, dated 1970),
     // and a VALARM carries its own SUMMARY and DESCRIPTION. An unscoped match
     // finds whichever comes first in the file.
-    _componentLines(lines) {
+    _componentLines(lines, from = 0) {
         let name = null;
         let nested = 0;
         const own = [];
-        for (let i = 0; i < lines.length; i++) {
+        for (let i = from; i < lines.length; i++) {
             const line = lines[i];
             if (!name) {
                 const begin = /^BEGIN:(VTODO|VEVENT)\s*$/.exec(line);
@@ -1377,6 +1394,17 @@ const CalDAV = {
         const lines = vcal.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
         const component = this._componentLines(lines);
         return component ? component.own.map(i => lines[i]).join('\n') : '';
+    },
+
+    // The same for every component in the file. An expanded recurring event
+    // comes back as one VEVENT per occurrence.
+    _componentTexts(vcal) {
+        const lines = vcal.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
+        const texts = [];
+        for (let c = this._componentLines(lines); c; c = this._componentLines(lines, c.end + 1)) {
+            texts.push(c.own.map(i => lines[i]).join('\n'));
+        }
+        return texts;
     },
 
     // Replace, insert, or (value === null) remove a property on the component.
