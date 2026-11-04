@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const bundle = join(repoRoot, 'scripts', 'nextcloud.js');
@@ -44,9 +45,7 @@ const addressBookDiscovery = `<?xml version="1.0" encoding="utf-8"?>
   </d:response>
 </d:multistatus>`;
 
-const groupedContactReport = `<?xml version="1.0" encoding="utf-8"?>
-<d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
-  <d:response>
+const groupedContactResponse = `  <d:response>
     <d:href>/remote.php/dav/addressbooks/users/tester/contacts/grouped.vcf</d:href>
     <d:propstat><d:prop>
       <d:getetag>"grouped"</d:getetag>
@@ -60,7 +59,32 @@ item2.TEL:+15551234567
 item3.BDAY:1943-10-19
 END:VCARD</card:address-data>
     </d:prop></d:propstat>
-  </d:response>
+  </d:response>`;
+
+// Two addresses, sent with CRLF as Nextcloud does. The home one is grouped and
+// carries a quoted LABEL with a colon in it; the work one is folded across two
+// lines, as any property longer than 75 octets is.
+const addressedContactResponse = `  <d:response>
+    <d:href>/remote.php/dav/addressbooks/users/tester/contacts/addressed.vcf</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"addressed"</d:getetag>
+      <card:address-data>BEGIN:VCARD&#13;
+VERSION:3.0&#13;
+UID:addressed&#13;
+FN:Addressed Contact&#13;
+N:Contact;Addressed;;;&#13;
+item1.ADR;TYPE=HOME;LABEL="1 Old Rd: rear":PO Box 7;Flat 2;1 Old Rd\\, rear;Oldtown;Old County;OT1 1AA;Oldland&#13;
+item1.X-ABLabel:Home&#13;
+ADR;TYPE=WORK:;;99 Long Street Name That Pushes The Line Past Seventy-Five Oct&#13;
+ ets;Worktown;;WK2 2BB;Workland&#13;
+END:VCARD&#13;
+</card:address-data>
+    </d:prop></d:propstat>
+  </d:response>`;
+
+const contactReport = (...responses) => `<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+${responses.join('\n')}
 </d:multistatus>`;
 
 const eventReport = `<?xml version="1.0" encoding="utf-8"?>
@@ -418,7 +442,11 @@ const server = http.createServer(async (req, res) => {
   } else if (req.method === 'REPORT' &&
              req.url === '/remote.php/dav/addressbooks/users/tester/contacts/') {
     res.setHeader('content-type', 'application/xml');
-    res.end(groupedContactReport);
+    // findContactPath names the UID it is looking for and takes the first card
+    // back, so the addressed card is sent alone when it is the one asked for.
+    res.end(body.includes('>addressed<')
+      ? contactReport(addressedContactResponse)
+      : contactReport(groupedContactResponse, addressedContactResponse));
   } else if (req.method === 'REPORT' &&
              req.url === '/remote.php/dav/calendars/tester/work/') {
     res.setHeader('content-type', 'application/xml');
@@ -1054,6 +1082,249 @@ for (const subcommand of ['create', 'edit']) {
     { result }
   );
 }
+
+// --- Contacts: postal address (ADR) ---
+
+const adrLines = body => (body ?? '')
+  .split(/\r?\n/)
+  .filter(line => /^(?:[A-Za-z0-9-]+\.)?ADR[;:]/i.test(line));
+
+result = await run(['contacts', 'get', '--uid', 'addressed']);
+let addressedContact = null;
+try {
+  addressedContact = JSON.parse(result.stdout)?.data ?? null;
+} catch {
+  // The assertion below preserves the parse failure as test evidence.
+}
+const [homeAddress, workAddress] = addressedContact?.addresses ?? [];
+record(
+  'ADR parses into components past a group prefix and a quoted LABEL',
+  result.code === 0 &&
+    isDeepStrictEqual(homeAddress, {
+      types: ['home'],
+      poBox: 'PO Box 7',
+      extended: 'Flat 2',
+      street: '1 Old Rd, rear',
+      city: 'Oldtown',
+      region: 'Old County',
+      postalCode: 'OT1 1AA',
+      country: 'Oldland'
+    }),
+  { homeAddress, result }
+);
+
+record(
+  'a folded ADR is unfolded before it is parsed',
+  result.code === 0 &&
+    isDeepStrictEqual(workAddress, {
+      types: ['work'],
+      poBox: '',
+      extended: '',
+      street: '99 Long Street Name That Pushes The Line Past Seventy-Five Octets',
+      city: 'Worktown',
+      region: '',
+      postalCode: 'WK2 2BB',
+      country: 'Workland'
+    }),
+  { workAddress, result }
+);
+
+record(
+  'a contact with no ADR reports addresses as null',
+  groupedContact !== null && groupedContact.addresses === null,
+  { groupedContact }
+);
+
+before = requests.length;
+result = await run([
+  'contacts', 'create',
+  '--name', 'Dummy Address',
+  '--po-box', 'PO Box 9',
+  '--extended', 'Building B',
+  '--street', '123 Main St, Apt 4',
+  '--city', 'Springfield',
+  '--region', 'IL',
+  '--postal-code', '62704',
+  '--country', 'USA',
+  '--address-type', 'Home'
+]);
+const addressCreatePut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'contacts create writes a typed ADR with all seven components escaped',
+  result.code === 0 &&
+    addressCreatePut?.body.includes(
+      'ADR;TYPE=HOME:PO Box 9;Building B;123 Main St\\, Apt 4;Springfield;IL;62704;USA\nEND:VCARD'
+    ),
+  { body: addressCreatePut?.body ?? null, result }
+);
+
+// The newline is the property-injection attempt: it must stay inside the
+// component as an escaped \n rather than start an EMAIL line of its own.
+before = requests.length;
+result = await run([
+  'contacts', 'create',
+  '--name', 'Dummy Partial Address',
+  '--city', 'Springfield\nEMAIL:x@evil.example'
+]);
+const partialAddressPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'contacts create writes an untyped ADR and escapes a newline in a component',
+  result.code === 0 &&
+    isDeepStrictEqual(adrLines(partialAddressPut?.body), ['ADR:;;;Springfield\\nEMAIL:x@evil.example;;;']) &&
+    !/^EMAIL/m.test(partialAddressPut?.body ?? ''),
+  { body: partialAddressPut?.body ?? null, result }
+);
+
+for (const [label, args, message] of [
+  ['an unknown address type', ['--city', 'Springfield', '--address-type', 'holiday'], 'Invalid address type'],
+  ['an address type injection attempt', ['--city', 'Springfield', '--address-type', 'home;X-EVIL=1'], 'Invalid address type'],
+  ['an address type with no address', ['--address-type', 'home'], '--address-type needs at least one of']
+]) {
+  before = requests.length;
+  result = await run(['contacts', 'create', '--name', 'Dummy Rejected', ...args]);
+  record(
+    `contacts create rejects ${label} before a request`,
+    result.code !== 0 && result.stderr.includes(message) && requests.length === before,
+    { result }
+  );
+}
+
+// Without --address-type the first address is edited. The other components go
+// back byte for byte, an empty value clears one, and the LABEL is dropped
+// because it still shows the old address.
+before = requests.length;
+result = await run([
+  'contacts', 'edit',
+  '--uid', 'addressed',
+  '--city', 'Newtown',
+  '--region', ''
+]);
+const cityEditPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'contacts edit changes only the components passed on the first ADR',
+  result.code === 0 &&
+    adrLines(cityEditPut?.body)[0] ===
+      'item1.ADR;TYPE=HOME:PO Box 7;Flat 2;1 Old Rd\\, rear;Newtown;;OT1 1AA;Oldland' &&
+    cityEditPut?.body.includes('item1.X-ABLabel:Home\r\n') &&
+    // The folded work address is untouched, continuation line and all.
+    cityEditPut?.body.includes(
+      'ADR;TYPE=WORK:;;99 Long Street Name That Pushes The Line Past Seventy-Five Oct\r\n ets;Worktown;;WK2 2BB;Workland\r\n'
+    ),
+  { body: cityEditPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run([
+  'contacts', 'edit',
+  '--uid', 'addressed',
+  '--address-type', 'work',
+  '--street', '1 New St'
+]);
+const workEditPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'contacts edit --address-type picks its address and rewrites a folded ADR as one line',
+  result.code === 0 &&
+    workEditPut?.body.includes('\r\nADR;TYPE=WORK:;;1 New St;Worktown;;WK2 2BB;Workland\r\nEND:VCARD') &&
+    !workEditPut?.body.includes(' ets;') &&
+    workEditPut?.body.includes('item1.ADR;TYPE=HOME;LABEL="1 Old Rd: rear":PO Box 7;'),
+  { body: workEditPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run([
+  'contacts', 'edit',
+  '--uid', 'addressed',
+  '--address-type', 'other',
+  '--city', 'Elsewhere'
+]);
+const otherEditPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'contacts edit adds an address of a type the contact does not have',
+  result.code === 0 &&
+    otherEditPut?.body.includes('Workland\r\nADR;TYPE=OTHER:;;;Elsewhere;;;\r\nEND:VCARD') &&
+    otherEditPut?.body.includes('item1.ADR;TYPE=HOME;LABEL="1 Old Rd: rear":PO Box 7;'),
+  { body: otherEditPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run([
+  'contacts', 'edit',
+  '--uid', 'addressed',
+  '--address-type', 'work',
+  '--street', '',
+  '--city', '',
+  '--region', '',
+  '--postal-code', '',
+  '--country', ''
+]);
+const clearAddressPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'contacts edit removes an address whose components are all cleared',
+  result.code === 0 &&
+    !clearAddressPut?.body.includes('WORK') &&
+    !clearAddressPut?.body.includes('ets;Worktown') &&
+    clearAddressPut?.body.includes('item1.X-ABLabel:Home\r\nEND:VCARD'),
+  { body: clearAddressPut?.body ?? null, result }
+);
+
+// The home address has a PO box and an extended address, so it is only empty,
+// and removed, once those are cleared too.
+before = requests.length;
+result = await run([
+  'contacts', 'edit',
+  '--uid', 'addressed',
+  '--address-type', 'home',
+  '--po-box', '',
+  '--extended', '',
+  '--street', '',
+  '--city', '',
+  '--region', '',
+  '--postal-code', '',
+  '--country', ''
+]);
+const clearHomePut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'contacts edit clears --po-box and --extended, removing an address set by another client',
+  result.code === 0 &&
+    !/^item1\.ADR/m.test(clearHomePut?.body ?? '') &&
+    clearHomePut?.body.includes('N:Contact;Addressed;;;\r\nitem1.X-ABLabel:Home\r\nADR;TYPE=WORK:'),
+  { body: clearHomePut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run(['contacts', 'search', '--query', 'Springfield']);
+const searchReport = requests.slice(before).find(entry => entry.method === 'REPORT');
+record(
+  'contacts search matches on the address',
+  result.code === 0 &&
+    /<card:prop-filter name="ADR">\s*<card:text-match[^>]*>Springfield<\/card:text-match>/
+      .test(searchReport?.body ?? ''),
+  { body: searchReport?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run([
+  'contacts', 'edit',
+  '--uid', 'grouped',
+  '--street', '1 Main St'
+]);
+const addAddressPut = requests.slice(before).find(entry => entry.method === 'PUT');
+record(
+  'contacts edit adds an ADR to a contact that has none',
+  result.code === 0 &&
+    addAddressPut?.body.includes('item3.BDAY:1943-10-19\nADR:;;1 Main St;;;;\nEND:VCARD'),
+  { body: addAddressPut?.body ?? null, result }
+);
+
+before = requests.length;
+result = await run(['contacts', 'edit', '--uid', 'addressed', '--city']);
+record(
+  'contacts edit reports --city with no value as a missing value',
+  result.code !== 0 &&
+    result.stderr.includes('Missing value for --city') &&
+    requests.length === before,
+  { result }
+);
 
 for (const [subcommand, args] of [
   ['create', ['--title', 'Invalid priority', '--priority', '10']],

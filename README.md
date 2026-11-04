@@ -338,7 +338,7 @@ node scripts/nextcloud.js addressbooks list
 # List all contacts
 node scripts/nextcloud.js contacts list
 
-# Search contacts
+# Search contacts (matches name, email, phone, organization or address)
 node scripts/nextcloud.js contacts search --query "john"
 
 # Create a contact
@@ -357,6 +357,18 @@ node scripts/nextcloud.js contacts edit --uid contact-uid \
 # Set or clear a birthday (--bday "" removes it)
 node scripts/nextcloud.js contacts edit --uid contact-uid --bday "1943-10-19"
 node scripts/nextcloud.js contacts edit --uid contact-uid --bday ""
+
+# Create a contact with a postal address (--address-type: home, work or other).
+# --po-box and --extended (apartment, suite or building) are also accepted.
+node scripts/nextcloud.js contacts create --name "Jane Doe" \
+  --street "123 Main St" --city "Springfield" --region "IL" \
+  --postal-code "62704" --country "USA" --address-type home
+
+# Change part of an address: only the components passed change, and
+# --address-type picks which address (a new one is added if there is none)
+node scripts/nextcloud.js contacts edit --uid contact-uid --city "Chicago"
+node scripts/nextcloud.js contacts edit --uid contact-uid --address-type work \
+  --street "1 Office Park" --city "Peoria"
 
 # Delete a contact
 node scripts/nextcloud.js contacts delete --uid contact-uid \
@@ -521,6 +533,7 @@ Thanks to:
 - [@kens-agents](https://github.com/kens-agents): optional task metadata on `tasks create` and `tasks edit` (`--start`, `--location`, `--url`, `--class`, `--tags`, `--status`, `--percent-complete`), including a fix for due and start dates written in local time under a UTC `Z` suffix; fix for `tasks list` hiding tasks created in the Nextcloud Tasks web app, which omit `STATUS`: per RFC 4791 §3.6.4 the CalDAV `prop-filter` only matched VTODOs that declare the property; and fix for Deck `boards`/`stacks`/`cards`/`labels` `delete` returning 403 without a JSON content type on the request. Discovered and reproduced by [@kendawson-online](https://github.com/kendawson-online).
 - [@wu07sn](https://github.com/wu07sn): fix for `calendar list` reporting a 1970 start for events with a local time, by reading `DTSTART` from the VEVENT instead of the first one in the file, which belongs to the VTIMEZONE.
 - [@flusteredfognozzle](https://github.com/flusteredfognozzle): report and diagnosis of `calendar list` showing a recurring event only as its first occurrence, months in the past, with nothing to say it repeats ([#27](https://github.com/keithvassallomt/openclaw-nextcloud/issues/27)).
+- [@jkgagnon](https://github.com/jkgagnon): request for structured postal addresses on `contacts create` and `contacts edit` ([#28](https://github.com/keithvassallomt/openclaw-nextcloud/issues/28)).
 
 ## License
 

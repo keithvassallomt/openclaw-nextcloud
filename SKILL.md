@@ -219,9 +219,9 @@ File listings and search results include a `fileId` (when the server returns one
 ### Contacts
 - `contacts list [--addressbook <ab>]`
 - `contacts get --uid <u> [--addressbook <ab>]`
-- `contacts search --query <q> [--addressbook <ab>]`
-- `contacts create --name <n> [--addressbook <ab>] [--email <e>] [--phone <p>] [--organization <o>] [--title <t>] [--note <n> | --note-file <file>] [--bday <date>]`
-- `contacts edit --uid <u> [--addressbook <ab>] [--name <n>] [--email <e>] [--phone <p>] [--organization <o>] [--title <t>] [--note <n> | --note-file <file>] [--bday <date>]`
+- `contacts search --query <q> [--addressbook <ab>]` (matches name, email, phone, organization or address)
+- `contacts create --name <n> [--addressbook <ab>] [--email <e>] [--phone <p>] [--organization <o>] [--title <t>] [--note <n> | --note-file <file>] [--bday <date>] [--po-box <p>] [--extended <e>] [--street <s>] [--city <c>] [--region <r>] [--postal-code <p>] [--country <c>] [--address-type home|work|other]`
+- `contacts edit --uid <u> [--addressbook <ab>] [--name <n>] [--email <e>] [--phone <p>] [--organization <o>] [--title <t>] [--note <n> | --note-file <file>] [--bday <date>] [--po-box <p>] [--extended <e>] [--street <s>] [--city <c>] [--region <r>] [--postal-code <p>] [--country <c>] [--address-type home|work|other]`
 
 `--bday` accepts `YYYY-MM-DD` (`1943-10-19`), the compact form (`19431019`),
 or `--MM-DD` (`--10-19`) when the year is unknown. The value is validated and
@@ -229,6 +229,24 @@ normalised, never escaped: it goes straight into a property line, so a malformed
 value is rejected before any request rather than written. On `contacts edit`, an
 empty value (`--bday ""`) removes the property. `contacts list`, `get` and
 `search` return it as `birthday`.
+
+The address flags write one structured postal address (vCard `ADR`), which
+Nextcloud Contacts shows in its own address fields. Pass any subset of them.
+`--extended` is the apartment, suite or building. `--address-type` is optional
+and needs at least one of the other address flags. On `contacts edit`:
+- Only the components you pass change; the rest of the address is kept.
+- An empty value (`--city ""`) clears that component. Clearing all seven
+  (`--po-box`, `--extended`, `--street`, `--city`, `--region`, `--postal-code`,
+  `--country`) removes the address.
+- `--address-type` picks which address to change: the contact's first address
+  of that type, or a new one if it has none. Without it, the first address is
+  changed, or one is added if the contact has none. A contact can hold one
+  address of each type this way.
+- `contacts edit` cannot change the type of an existing address. To move an
+  address to another type, remove it (clear all seven with its current
+  `--address-type`), then add it again with the new `--address-type`.
+
+`contacts list`, `get` and `search` return addresses as `addresses` (see below).
 - `contacts delete --uid <u> [--addressbook <ab>] --confirm contacts:delete`
 
 ### Address Books (list available address books)
@@ -359,7 +377,19 @@ Date inputs (`--due`, `--start`, `--end`, `--from`, `--to`) accept either ISO 86
       "emails": ["john@example.com"],
       "organization": "ACME Inc",
       "title": "Developer",
-      "note": "Met at conference"
+      "note": "Met at conference",
+      "addresses": [
+        {
+          "types": ["home"],
+          "poBox": "",
+          "extended": "",
+          "street": "123 Main St",
+          "city": "Springfield",
+          "region": "IL",
+          "postalCode": "62704",
+          "country": "USA"
+        }
+      ]
     }
   ]
 }
@@ -367,6 +397,7 @@ Date inputs (`--due`, `--start`, `--end`, `--from`, `--to`) accept either ISO 86
 - `phones`: Array of phone numbers or null
 - `emails`: Array of email addresses or null
 - `name`: Structured name in vCard format (Last;First;Middle;Prefix;Suffix)
+- `addresses`: Array of postal addresses or null. `types` holds the lowercased vCard types (`home`, `work`, `other`, sometimes `pref`), empty when the address has none. `extended` is the apartment, suite or building.
 
 ### Deck Stacks List Output
 `stacks list` returns each column with its cards nested:
@@ -507,7 +538,7 @@ Tasks: ✅ (completed), ⬜ (pending), 🔴 (high priority), 🟡 (medium), 🟢
 Calendar: 📅 (event), ⏰ (time), 📍 (location)
 Notes: 📝 (note), 📁 (category)
 Files: 📄 (file), 📂 (folder), 💾 (size)
-Contacts: 👤 (person), 📧 (email), 📱 (phone), 🏢 (organization)
+Contacts: 👤 (person), 📧 (email), 📱 (phone), 🏢 (organization), 🏠 (address)
 Deck: 📋 (board), 🗂️ (stack/column), 🃏 (card), 🏷️ (label), 💬 (comment)
 Status: ✨ (created), ✏️ (updated), 🗑️ (deleted), ❌ (error)
 
@@ -540,6 +571,7 @@ Contacts:
    📧 john@example.com
    📱 +1 234 567 890
    🏢 ACME Inc — Developer
+   🏠 123 Main St, Springfield IL 62704, USA
 ```
 
 Files:

@@ -17954,6 +17954,28 @@ function parseBirthdayInput(value) {
     `Invalid birthday '${value}'. Use YYYY-MM-DD (1943-10-19), the compact form (19431019), or --MM-DD (--10-19) when the year is unknown.`
   );
 }
+var ADR_COMPONENTS = ["poBox", "extended", "street", "city", "region", "postalCode", "country"];
+var ADDRESS_TYPES = ["home", "work", "other"];
+var ADR_PROPERTY = /^(?:[A-Za-z0-9-]+\.)?ADR$/i;
+function parseAddressInput(components, type) {
+  const given = Object.fromEntries(
+    Object.entries(components).filter(([, value]) => value !== void 0)
+  );
+  if (Object.keys(given).length === 0) {
+    if (type !== void 0) {
+      throw new Error(
+        "--address-type needs at least one of --po-box, --extended, --street, --city, --region, --postal-code or --country."
+      );
+    }
+    return void 0;
+  }
+  if (type === void 0) return { type: null, components: given };
+  const normalized = type.trim().toLowerCase();
+  if (!ADDRESS_TYPES.includes(normalized)) {
+    throw new Error(`Invalid address type '${type}'. Valid values: ${ADDRESS_TYPES.join(", ")}.`);
+  }
+  return { type: normalized, components: given };
+}
 function parsePercentCompleteInput(value) {
   const str = String(value);
   if (!/^\d{1,3}$/.test(str)) {
@@ -18034,9 +18056,9 @@ var FLAG_TABLE = {
     "remove-label": "--board --card --label --stack"
   },
   contacts: {
-    create: "--addressbook --bday --email --name --note --note-file --organization --phone --title",
+    create: "--address-type --addressbook --bday --city --country --email --extended --name --note --note-file --organization --phone --po-box --postal-code --region --street --title",
     delete: "--addressbook --uid",
-    edit: "--addressbook --bday --email --name --note --note-file --organization --phone --title --uid",
+    edit: "--address-type --addressbook --bday --city --country --email --extended --name --note --note-file --organization --phone --po-box --postal-code --region --street --title --uid",
     get: "--addressbook --uid",
     list: "--addressbook",
     search: "--addressbook --query"
@@ -19243,6 +19265,7 @@ var Contacts = {
     return allContacts;
   },
   _parseVCard(vcard) {
+    vcard = vcard.replace(/\r?\n[ \t]/g, "");
     const cleanValue = (val) => val ? unescapePropertyValue(val.replace(/&#13;/g, "").replace(/\r/g, "").trim()) : null;
     const matchField = (field) => {
       const regex = new RegExp(`^(?:[A-Za-z0-9-]+\\.)?${field}(?:;[^:\\r\\n]*)?:(.*)$`, "mi");
@@ -19273,6 +19296,7 @@ var Contacts = {
     const org = getField("ORG");
     const title = getField("TITLE");
     const note = getField("NOTE");
+    const addresses = vcard.split(/\r?\n/).map((line) => this._parseContentLine(line)).filter((prop) => prop && ADR_PROPERTY.test(prop.name)).map((prop) => this._parseAddress(prop));
     let birthday = getField("BDAY");
     if (birthday !== null) {
       try {
@@ -19299,8 +19323,90 @@ var Contacts = {
       organization: org,
       title,
       note,
-      birthday
+      birthday,
+      addresses: addresses.length > 0 ? addresses : null
     };
+  },
+  // Split an unfolded property line into its name (with any group prefix), its
+  // parameters and its value. A ";" or ":" inside a quoted parameter value does
+  // not count: vCard 4.0 puts the formatted address on ADR as LABEL="...", which
+  // can hold either.
+  _parseContentLine(line) {
+    const head = [];
+    let start = 0;
+    let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        quoted = !quoted;
+      } else if (!quoted && (char === ";" || char === ":")) {
+        head.push(line.slice(start, i));
+        start = i + 1;
+        if (char === ":") {
+          const [name, ...params] = head;
+          return { name, params, value: line.slice(start) };
+        }
+      }
+    }
+    return null;
+  },
+  // TYPE values on a property, lowercased: TYPE=home,pref and TYPE=HOME;TYPE=PREF
+  // both give ['home', 'pref']. A bare parameter (ADR;HOME:) is the vCard 2.1
+  // spelling of a type and counts as one.
+  _paramTypes(params) {
+    return params.flatMap((param) => {
+      const eq = param.indexOf("=");
+      if (eq === -1) return [param];
+      return param.slice(0, eq).toUpperCase() === "TYPE" ? param.slice(eq + 1).replace(/"/g, "").split(",") : [];
+    }).map((type) => type.trim().toLowerCase()).filter(Boolean);
+  },
+  // Like N, the components are split before they are unescaped, so an escaped
+  // ";" in a street name stays in the street.
+  _parseAddress(prop) {
+    const parts = splitStructuredValue(prop.value).map((part) => unescapePropertyValue(part));
+    const address = { types: this._paramTypes(prop.params) };
+    ADR_COMPONENTS.forEach((key, i) => {
+      address[key] = parts[i] ?? null;
+    });
+    return address;
+  },
+  // Set the given components of one ADR and keep the rest of it as stored.
+  // `type` picks the first address of that type, or the first address of any
+  // type when it is null. When there is no such address a new one is added.
+  // An address left with every component empty is removed rather than written
+  // as ADR:;;;;;;.
+  _setAddress(vcard, { type, components }) {
+    const eol = vcard.includes("\r\n") ? "\r\n" : "\n";
+    const lines = vcard.split(/\r?\n/);
+    let first = 0;
+    let last = -1;
+    let target = null;
+    while (!target && last + 1 < lines.length) {
+      first = last + 1;
+      last = first;
+      while (last + 1 < lines.length && /^[ \t]/.test(lines[last + 1])) last++;
+      const unfolded = lines.slice(first, last + 1).map((line2, i) => i === 0 ? line2 : line2.slice(1)).join("");
+      const prop = this._parseContentLine(unfolded);
+      if (prop && ADR_PROPERTY.test(prop.name) && (type === null || this._paramTypes(prop.params).includes(type))) {
+        target = prop;
+      }
+    }
+    const stored = target ? splitStructuredValue(target.value) : [];
+    const parts = ADR_COMPONENTS.map(
+      (key, i) => components[key] !== void 0 ? escapePropertyValue(components[key]) : stored[i] ?? ""
+    );
+    let line = null;
+    if (parts.some((part) => part !== "")) {
+      const head = target ? [target.name, ...target.params.filter((param) => !/^LABEL=/i.test(param))] : ["ADR", ...type ? [`TYPE=${type.toUpperCase()}`] : []];
+      line = `${head.join(";")}:${parts.join(";")}`;
+    }
+    if (target) {
+      lines.splice(first, last - first + 1, ...line === null ? [] : [line]);
+    } else if (line !== null) {
+      const end = lines.findIndex((l) => /^END:VCARD\s*$/i.test(l));
+      lines.splice(end === -1 ? lines.length : end, 0, line);
+    }
+    return lines.join(eol);
   },
   async get(uid, addressBookName = null) {
     const contacts = await this.list(addressBookName);
@@ -19388,6 +19494,7 @@ FN:${escapedFn}
     if (options.bday) vcard += `BDAY:${options.bday}
 `;
     vcard += `END:VCARD`;
+    if (options.address) vcard = this._setAddress(vcard, options.address);
     const filename = `${uid}.vcf`;
     const urlWithSlash = ab.url.endsWith("/") ? ab.url : ab.url + "/";
     const endpoint = `${urlWithSlash}${filename}`;
@@ -19440,6 +19547,7 @@ END:VCARD`);
     if (updates.bday !== void 0) {
       vcard = updates.bday === "" ? this._removeVCardField(vcard, "BDAY") : this._updateVCardField(vcard, "BDAY", updates.bday);
     }
+    if (updates.address) vcard = this._setAddress(vcard, updates.address);
     await request(contact.href, {
       method: "PUT",
       headers: {
@@ -19486,6 +19594,9 @@ END:VCARD`);
                         <card:text-match collation="i;unicode-casemap" match-type="contains">${query}</card:text-match>
                     </card:prop-filter>
                     <card:prop-filter name="ORG">
+                        <card:text-match collation="i;unicode-casemap" match-type="contains">${query}</card:text-match>
+                    </card:prop-filter>
+                    <card:prop-filter name="ADR">
                         <card:text-match collation="i;unicode-casemap" match-type="contains">${query}</card:text-match>
                     </card:prop-filter>
                 </card:filter>
@@ -20131,6 +20242,16 @@ async function main() {
         if (note !== void 0) options.note = note;
         const bday = getOptionValue(args, "--bday");
         if (bday !== void 0) options.bday = parseBirthdayInput(bday);
+        const address = parseAddressInput({
+          poBox: getOptionValue(args, "--po-box"),
+          extended: getOptionValue(args, "--extended"),
+          street: getOptionValue(args, "--street"),
+          city: getOptionValue(args, "--city"),
+          region: getOptionValue(args, "--region"),
+          postalCode: getOptionValue(args, "--postal-code"),
+          country: getOptionValue(args, "--country")
+        }, getOptionValue(args, "--address-type"));
+        if (address !== void 0) options.address = address;
         output(await Contacts.create(fullName, addressBook, options));
       } else if (subCommand === "edit") {
         const uidIndex = args.indexOf("--uid");
@@ -20155,6 +20276,16 @@ async function main() {
         if (bday !== void 0) {
           updates.bday = bday === "" ? "" : parseBirthdayInput(bday);
         }
+        const address = parseAddressInput({
+          poBox: getOptionValue(args, "--po-box"),
+          extended: getOptionValue(args, "--extended"),
+          street: getOptionValue(args, "--street"),
+          city: getOptionValue(args, "--city"),
+          region: getOptionValue(args, "--region"),
+          postalCode: getOptionValue(args, "--postal-code"),
+          country: getOptionValue(args, "--country")
+        }, getOptionValue(args, "--address-type"));
+        if (address !== void 0) updates.address = address;
         output(await Contacts.update(uid, addressBook, updates));
       } else if (subCommand === "delete") {
         const uidIndex = args.indexOf("--uid");

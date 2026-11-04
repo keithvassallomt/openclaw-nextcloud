@@ -344,6 +344,38 @@ function parseBirthdayInput(value) {
     );
 }
 
+// ADR components in the order RFC 2426 3.2.1 gives them, named after the flags
+// that set them.
+const ADR_COMPONENTS = ['poBox', 'extended', 'street', 'city', 'region', 'postalCode', 'country'];
+const ADDRESS_TYPES = ['home', 'work', 'other'];
+const ADR_PROPERTY = /^(?:[A-Za-z0-9-]+\.)?ADR$/i;
+
+// The address flags of `contacts create` and `contacts edit`, keyed by ADR
+// component, with undefined for a flag that was not passed. Returns undefined
+// when no component was passed. The type becomes a parameter rather than a
+// value, so it is checked against the list instead of escaped.
+function parseAddressInput(components, type) {
+    const given = Object.fromEntries(
+        Object.entries(components).filter(([, value]) => value !== undefined)
+    );
+    if (Object.keys(given).length === 0) {
+        if (type !== undefined) {
+            throw new Error(
+                '--address-type needs at least one of --po-box, --extended, --street, --city, ' +
+                '--region, --postal-code or --country.'
+            );
+        }
+        return undefined;
+    }
+    if (type === undefined) return { type: null, components: given };
+
+    const normalized = type.trim().toLowerCase();
+    if (!ADDRESS_TYPES.includes(normalized)) {
+        throw new Error(`Invalid address type '${type}'. Valid values: ${ADDRESS_TYPES.join(', ')}.`);
+    }
+    return { type: normalized, components: given };
+}
+
 function parsePercentCompleteInput(value) {
     const str = String(value);
     if (!/^\d{1,3}$/.test(str)) {
@@ -443,9 +475,9 @@ const FLAG_TABLE = {
         'remove-label': '--board --card --label --stack',
     },
     contacts: {
-        create: '--addressbook --bday --email --name --note --note-file --organization --phone --title',
+        create: '--address-type --addressbook --bday --city --country --email --extended --name --note --note-file --organization --phone --po-box --postal-code --region --street --title',
         delete: '--addressbook --uid',
-        edit: '--addressbook --bday --email --name --note --note-file --organization --phone --title --uid',
+        edit: '--address-type --addressbook --bday --city --country --email --extended --name --note --note-file --organization --phone --po-box --postal-code --region --street --title --uid',
         get: '--addressbook --uid',
         list: '--addressbook',
         search: '--addressbook --query',
@@ -1902,6 +1934,10 @@ const Contacts = {
     },
 
     _parseVCard(vcard) {
+        // Unfold first: a property longer than 75 octets continues on lines that
+        // start with whitespace (RFC 6350 3.2), and a full address often is one.
+        vcard = vcard.replace(/\r?\n[ \t]/g, '');
+
         // Normalize line endings (vCard uses CRLF, and XML may encode CR as &#13;)
         const cleanValue = (val) => val
             ? unescapePropertyValue(val.replace(/&#13;/g, '').replace(/\r/g, '').trim())
@@ -1950,6 +1986,11 @@ const Contacts = {
         const title = getField('TITLE');
         const note = getField('NOTE');
 
+        const addresses = vcard.split(/\r?\n/)
+            .map(line => this._parseContentLine(line))
+            .filter(prop => prop && ADR_PROPERTY.test(prop.name))
+            .map(prop => this._parseAddress(prop));
+
         // Expose BDAY in the normalised form when it is one we recognise, and
         // pass through whatever the server holds when it is not, so an unusual
         // value stays visible instead of being silently dropped.
@@ -1981,8 +2022,111 @@ const Contacts = {
             organization: org,
             title: title,
             note: note,
-            birthday: birthday
+            birthday: birthday,
+            addresses: addresses.length > 0 ? addresses : null
         };
+    },
+
+    // Split an unfolded property line into its name (with any group prefix), its
+    // parameters and its value. A ";" or ":" inside a quoted parameter value does
+    // not count: vCard 4.0 puts the formatted address on ADR as LABEL="...", which
+    // can hold either.
+    _parseContentLine(line) {
+        const head = [];
+        let start = 0;
+        let quoted = false;
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            if (char === '"') {
+                quoted = !quoted;
+            } else if (!quoted && (char === ';' || char === ':')) {
+                head.push(line.slice(start, i));
+                start = i + 1;
+                if (char === ':') {
+                    const [name, ...params] = head;
+                    return { name, params, value: line.slice(start) };
+                }
+            }
+        }
+        return null;
+    },
+
+    // TYPE values on a property, lowercased: TYPE=home,pref and TYPE=HOME;TYPE=PREF
+    // both give ['home', 'pref']. A bare parameter (ADR;HOME:) is the vCard 2.1
+    // spelling of a type and counts as one.
+    _paramTypes(params) {
+        return params.flatMap(param => {
+            const eq = param.indexOf('=');
+            if (eq === -1) return [param];
+            return param.slice(0, eq).toUpperCase() === 'TYPE'
+                ? param.slice(eq + 1).replace(/"/g, '').split(',')
+                : [];
+        }).map(type => type.trim().toLowerCase()).filter(Boolean);
+    },
+
+    // Like N, the components are split before they are unescaped, so an escaped
+    // ";" in a street name stays in the street.
+    _parseAddress(prop) {
+        const parts = splitStructuredValue(prop.value).map(part => unescapePropertyValue(part));
+        const address = { types: this._paramTypes(prop.params) };
+        ADR_COMPONENTS.forEach((key, i) => {
+            address[key] = parts[i] ?? null;
+        });
+        return address;
+    },
+
+    // Set the given components of one ADR and keep the rest of it as stored.
+    // `type` picks the first address of that type, or the first address of any
+    // type when it is null. When there is no such address a new one is added.
+    // An address left with every component empty is removed rather than written
+    // as ADR:;;;;;;.
+    _setAddress(vcard, { type, components }) {
+        const eol = vcard.includes('\r\n') ? '\r\n' : '\n';
+        const lines = vcard.split(/\r?\n/);
+
+        // Lines that start with whitespace continue the property before them, so
+        // the target is a run of lines [first, last], replaced as one.
+        let first = 0;
+        let last = -1;
+        let target = null;
+        while (!target && last + 1 < lines.length) {
+            first = last + 1;
+            last = first;
+            while (last + 1 < lines.length && /^[ \t]/.test(lines[last + 1])) last++;
+            const unfolded = lines.slice(first, last + 1)
+                .map((line, i) => (i === 0 ? line : line.slice(1)))
+                .join('');
+            const prop = this._parseContentLine(unfolded);
+            if (prop && ADR_PROPERTY.test(prop.name) &&
+                (type === null || this._paramTypes(prop.params).includes(type))) {
+                target = prop;
+            }
+        }
+
+        // Components that were not passed keep their stored text, still escaped,
+        // so they go back byte for byte.
+        const stored = target ? splitStructuredValue(target.value) : [];
+        const parts = ADR_COMPONENTS.map((key, i) =>
+            components[key] !== undefined ? escapePropertyValue(components[key]) : (stored[i] ?? '')
+        );
+
+        let line = null;
+        if (parts.some(part => part !== '')) {
+            // The group and parameters are kept, except a LABEL: it is the old
+            // address formatted for display, and would contradict the new one.
+            const head = target
+                ? [target.name, ...target.params.filter(param => !/^LABEL=/i.test(param))]
+                : ['ADR', ...(type ? [`TYPE=${type.toUpperCase()}`] : [])];
+            line = `${head.join(';')}:${parts.join(';')}`;
+        }
+
+        if (target) {
+            lines.splice(first, last - first + 1, ...(line === null ? [] : [line]));
+        } else if (line !== null) {
+            const end = lines.findIndex(l => /^END:VCARD\s*$/i.test(l));
+            lines.splice(end === -1 ? lines.length : end, 0, line);
+        }
+        return lines.join(eol);
     },
 
     async get(uid, addressBookName = null) {
@@ -2071,6 +2215,7 @@ const Contacts = {
         if (options.bday) vcard += `BDAY:${options.bday}\n`;
 
         vcard += `END:VCARD`;
+        if (options.address) vcard = this._setAddress(vcard, options.address);
 
         const filename = `${uid}.vcf`;
         const urlWithSlash = ab.url.endsWith('/') ? ab.url : ab.url + '/';
@@ -2136,6 +2281,7 @@ const Contacts = {
                 ? this._removeVCardField(vcard, 'BDAY')
                 : this._updateVCardField(vcard, 'BDAY', updates.bday);
         }
+        if (updates.address) vcard = this._setAddress(vcard, updates.address);
 
         await request(contact.href, {
             method: 'PUT',
@@ -2191,6 +2337,9 @@ const Contacts = {
                         <card:text-match collation="i;unicode-casemap" match-type="contains">${query}</card:text-match>
                     </card:prop-filter>
                     <card:prop-filter name="ORG">
+                        <card:text-match collation="i;unicode-casemap" match-type="contains">${query}</card:text-match>
+                    </card:prop-filter>
+                    <card:prop-filter name="ADR">
                         <card:text-match collation="i;unicode-casemap" match-type="contains">${query}</card:text-match>
                     </card:prop-filter>
                 </card:filter>
@@ -2947,6 +3096,17 @@ async function main() {
                 const bday = getOptionValue(args, '--bday');
                 if (bday !== undefined) options.bday = parseBirthdayInput(bday);
 
+                const address = parseAddressInput({
+                    poBox: getOptionValue(args, '--po-box'),
+                    extended: getOptionValue(args, '--extended'),
+                    street: getOptionValue(args, '--street'),
+                    city: getOptionValue(args, '--city'),
+                    region: getOptionValue(args, '--region'),
+                    postalCode: getOptionValue(args, '--postal-code'),
+                    country: getOptionValue(args, '--country')
+                }, getOptionValue(args, '--address-type'));
+                if (address !== undefined) options.address = address;
+
                 output(await Contacts.create(fullName, addressBook, options));
             } else if (subCommand === 'edit') {
                 const uidIndex = args.indexOf('--uid');
@@ -2982,6 +3142,19 @@ async function main() {
                 if (bday !== undefined) {
                     updates.bday = bday === '' ? '' : parseBirthdayInput(bday);
                 }
+
+                // Only the components passed are changed, and an empty value
+                // clears one. --address-type picks which address to change.
+                const address = parseAddressInput({
+                    poBox: getOptionValue(args, '--po-box'),
+                    extended: getOptionValue(args, '--extended'),
+                    street: getOptionValue(args, '--street'),
+                    city: getOptionValue(args, '--city'),
+                    region: getOptionValue(args, '--region'),
+                    postalCode: getOptionValue(args, '--postal-code'),
+                    country: getOptionValue(args, '--country')
+                }, getOptionValue(args, '--address-type'));
+                if (address !== undefined) updates.address = address;
 
                 output(await Contacts.update(uid, addressBook, updates));
             } else if (subCommand === 'delete') {
